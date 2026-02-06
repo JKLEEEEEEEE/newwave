@@ -4,9 +4,15 @@ import React, { useState, useMemo } from 'react';
 interface Props {
   dealId: string;
   activePage: number | null;
+  onUploadClick?: () => void;
+  aiSummary?: {
+    industry_overview_highlights: string[];
+    deal_structure_financing_plan: string[];
+    risk_factors_mitigation: string[];
+  };
 }
 
-const DocumentViewer: React.FC<Props> = ({ dealId, activePage }) => {
+const DocumentViewer: React.FC<Props> = ({ dealId, activePage, onUploadClick, aiSummary }) => {
   const [activeTab, setActiveTab] = useState<'pdf' | 'excel'>('pdf');
 
   const content = useMemo(() => {
@@ -55,24 +61,21 @@ const DocumentViewer: React.FC<Props> = ({ dealId, activePage }) => {
   return (
     <div className="flex flex-col h-full bg-slate-100 font-sans">
       <div className="flex bg-slate-200 p-1 border-b border-slate-300">
-        <button 
-          onClick={() => setActiveTab('pdf')}
+        <button
+          onClick={() => {
+            setActiveTab('pdf');
+            // onUploadClick?.(); // Optional: Disable click-to-upload here if we strictly want only the new button
+          }}
           className={`px-4 py-2 text-xs font-bold rounded-t transition-all ${activeTab === 'pdf' ? 'bg-white text-[#003366] border-b-2 border-[#003366] shadow-sm' : 'text-slate-500 hover:bg-slate-300'}`}
         >
           [IM 보고서: {content.title}]
         </button>
-        <button 
-          onClick={() => setActiveTab('excel')}
-          className={`px-4 py-2 text-xs font-bold rounded-t transition-all ${activeTab === 'excel' ? 'bg-white text-[#003366] border-b-2 border-[#003366] shadow-sm' : 'text-slate-500 hover:bg-slate-300'}`}
-        >
-          [현금흐름 시뮬레이션]
-        </button>
       </div>
 
-      <div className="flex-1 p-8 overflow-y-auto custom-scrollbar flex flex-col items-center">
-        <div className="w-full max-w-[700px] bg-white shadow-xl p-16 relative mb-12 min-h-[1000px] border border-slate-200">
+      <div className="flex-1 px-8 pt-8 pb-2 overflow-y-auto overflow-x-visible custom-scrollbar flex flex-col items-center">
+        <div className="w-full max-w-[700px] bg-white shadow-xl p-16 relative mb-0 border border-slate-200 rounded-xl">
           <div className="absolute top-8 right-12 text-[9px] text-rose-600 font-bold border border-rose-200 px-2 py-0.5 rounded uppercase">대외주의 - 사외 배포금지</div>
-          
+
           <div className="mb-12 border-b border-slate-100 pb-8">
             <h2 className="text-3xl font-black text-slate-900 mb-2">{content.title}</h2>
             <p className="text-sm text-slate-500 font-bold tracking-tight">{content.subtitle}</p>
@@ -88,43 +91,71 @@ const DocumentViewer: React.FC<Props> = ({ dealId, activePage }) => {
                 본 건은 <span className="font-bold text-slate-900">{content.sector}</span> 섹터의 선도 기업에 대한 투자 적정성 검토 건임.
               </p>
               <div className="bg-slate-50 p-6 rounded-lg border border-slate-100">
-                <ul className="list-disc ml-4 space-y-3 text-slate-600">
-                  <li><span className="font-bold text-slate-900">시장 지위:</span> {content.context}</li>
-                  <li><span className="font-bold text-slate-900">핵심 강점:</span> {content.highlight}</li>
-                </ul>
+                {aiSummary ? (
+                  <ul className="list-disc ml-4 space-y-3 text-slate-600">
+                    {aiSummary.industry_overview_highlights.map((point, i) => (
+                      <li key={i}><span className="font-bold text-slate-900">Highight {i + 1}:</span> {point}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <ul className="list-disc ml-4 space-y-3 text-slate-600">
+                    <li><span className="font-bold text-slate-900">시장 지위:</span> {content.context}</li>
+                    <li><span className="font-bold text-slate-900">핵심 강점:</span> {content.highlight}</li>
+                  </ul>
+                )}
               </div>
             </section>
 
             <section className={`transition-all duration-700 rounded-lg p-8 border ${activePage === 2 ? 'bg-emerald-50 border-emerald-300 ring-4 ring-emerald-100 shadow-lg scale-[1.02]' : 'bg-slate-50 border-slate-100'}`}>
               <h3 className="text-base font-bold text-slate-900 mb-4">2. 딜 구조 및 자금 조달 계획</h3>
-              <table className="w-full text-xs mb-6">
-                <tbody>
-                  <tr className="border-b border-slate-200"><td className="py-3 text-slate-400">총 펀딩 규모</td><td className="py-3 font-black text-[#003366] text-right">{content.dealSize}</td></tr>
-                  <tr className="border-b border-slate-200"><td className="py-3 text-slate-400">자기 자본 (Equity)</td><td className="py-3 font-bold text-right">{content.equity}</td></tr>
-                  <tr className="border-b border-slate-200"><td className="py-3 text-slate-400">인수 금융 (Debt)</td><td className="py-3 font-black text-rose-600 text-right">{content.debt}</td></tr>
-                </tbody>
-              </table>
-              <p className="text-[11px] italic text-slate-500 leading-normal">
-                * 주요 재무 임계치: 레버리지 비율 <span className="bg-[#003366] px-2 py-0.5 rounded text-white font-bold">{content.leverage}</span> 산출. 
-              </p>
+              {aiSummary ? (
+                <ul className="list-disc ml-4 space-y-2 text-xs text-slate-600">
+                  {aiSummary.deal_structure_financing_plan.map((point, i) => (
+                    <li key={i}>{point}</li>
+                  ))}
+                </ul>
+              ) : (
+                <>
+                  <table className="w-full text-xs mb-6">
+                    <tbody>
+                      <tr className="border-b border-slate-200"><td className="py-3 text-slate-400">총 펀딩 규모</td><td className="py-3 font-black text-[#003366] text-right">{content.dealSize}</td></tr>
+                      <tr className="border-b border-slate-200"><td className="py-3 text-slate-400">자기 자본 (Equity)</td><td className="py-3 font-bold text-right">{content.equity}</td></tr>
+                      <tr className="border-b border-slate-200"><td className="py-3 text-slate-400">인수 금융 (Debt)</td><td className="py-3 font-black text-rose-600 text-right">{content.debt}</td></tr>
+                    </tbody>
+                  </table>
+                  <p className="text-[11px] italic text-slate-500 leading-normal">
+                    * 주요 재무 임계치: 레버리지 비율 <span className="bg-[#003366] px-2 py-0.5 rounded text-white font-bold">{content.leverage}</span> 산출.
+                  </p>
+                </>
+              )}
             </section>
 
             <section className={`transition-all duration-700 rounded-lg p-8 border ${activePage === 3 ? 'bg-amber-50 border-amber-300 ring-4 ring-amber-100 shadow-lg scale-[1.02]' : 'bg-slate-50 border-slate-100'}`}>
               <h3 className="text-base font-bold text-slate-900 mb-4">3. 주요 위험 요소 및 사후 관리 방안</h3>
-              <p className="text-xs leading-relaxed text-slate-600">
-                {content.risk}
-                <br /><br />
-                당사는 본 건의 <span className="font-bold text-slate-900">상환 순위</span> 및 <span className="font-bold text-slate-900">담보권</span> 실행 가능성을 최우선으로 검토하였으며, 부실 시나리오 발생 시 AI 리스크 관제 센터를 통해 즉각적인 대응 프로세스를 가동할 예정임.
-              </p>
+              {aiSummary ? (
+                <ul className="list-disc ml-4 space-y-2 text-xs text-slate-600">
+                  {aiSummary.risk_factors_mitigation.map((point, i) => (
+                    <li key={i}>{point}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs leading-relaxed text-slate-600">
+                  {content.risk}
+                  <br /><br />
+                  당사는 본 건의 <span className="font-bold text-slate-900">상환 순위</span> 및 <span className="font-bold text-slate-900">담보권</span> 실행 가능성을 최우선으로 검토하였으며, 부실 시나리오 발생 시 AI 리스크 관제 센터를 통해 즉각적인 대응 프로세스를 가동할 예정임.
+                </p>
+              )}
             </section>
           </div>
 
-          <div className="absolute bottom-12 left-0 right-0 text-center">
-            <div className="inline-block px-5 py-1.5 bg-slate-100 rounded-full text-[10px] text-slate-400 font-black tracking-widest uppercase">JB INTERNAL - Page {activePage || 1} of 12</div>
+          <div className="mt-24 text-center border-t border-slate-100 pt-8">
+            <span className="inline-block px-4 py-1 bg-slate-50 rounded text-[9px] text-slate-400 font-bold tracking-[0.2em] uppercase">
+              JB Financial Group • Confidential • Internal Use Only
+            </span>
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

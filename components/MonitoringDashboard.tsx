@@ -19,13 +19,13 @@ interface GraphEdge {
 
 // 고정 자산 데이터 (7개)
 const ASSETS = [
-  { id: 'case1', name: '골든락 마이닝', sector: 's0', score: 89, x: 10, y: 80 },
-  { id: 'case2', name: '오비탈 에어로스페이스', sector: 's1', score: 42, x: 23, y: 80 },
-  { id: 'case3', name: '넥스트 로보틱스', sector: 's1', score: 65, x: 36, y: 80 },
-  { id: 'case4', name: '사이버다인 시스템즈', sector: 's3', score: 58, x: 50, y: 80 },
-  { id: 'case5', name: '아르젠텀 리소스', sector: 's0', score: 94, x: 63, y: 80 },
-  { id: 'case6', name: '세미콘 퓨처테크', sector: 's2', score: 91, x: 76, y: 80 },
-  { id: 'case7', name: '퀀텀 칩 솔루션', sector: 's2', score: 86, x: 90, y: 80 },
+  { id: 'case1', name: '골든락 마이닝', sector: 's0', score: 137, x: 10, y: 80 },
+  { id: 'case2', name: '오비탈 에어로스페이스', sector: 's1', score: 114, x: 23, y: 80 },
+  { id: 'case3', name: '넥스트 로보틱스', sector: 's1', score: 116, x: 36, y: 80 },
+  { id: 'case4', name: '사이버다인 시스템즈', sector: 's3', score: 115, x: 50, y: 80 },
+  { id: 'case5', name: '아르젠텀 리소스', sector: 's0', score: 145, x: 63, y: 80 },
+  { id: 'case6', name: '세미콘 퓨처테크', sector: 's2', score: 133, x: 76, y: 80 },
+  { id: 'case7', name: '퀀텀 칩 솔루션', sector: 's2', score: 124, x: 90, y: 80 },
 ];
 
 const MACROS = [
@@ -61,7 +61,7 @@ const MonitoringDashboard: React.FC = () => {
     ...SECTORS.map(s => ({ ...s, type: 'SECTOR' as const, status: HurdleStatus.PASS })),
     ...ASSETS.map(a => ({ ...a, type: 'ASSET' as const, status: a.score < 60 ? HurdleStatus.FAIL : HurdleStatus.PASS }))
   ]);
-  
+
   const [newsFeed, setNewsFeed] = useState<any[]>([]);
   const [activeNews, setActiveNews] = useState<any | null>(null);
   const [isLive, setIsLive] = useState(true);
@@ -157,8 +157,8 @@ const MonitoringDashboard: React.FC = () => {
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
           {newsFeed.map(news => (
-            <div 
-              key={news.uid} 
+            <div
+              key={news.uid}
               onClick={() => handleNewsClick(news)}
               className={`p-4 rounded-xl border transition-all cursor-pointer group ${activeNews?.uid === news.uid ? 'bg-rose-600/20 border-rose-500/50' : 'bg-white/5 border-white/5 hover:border-white/10'}`}
             >
@@ -176,7 +176,7 @@ const MonitoringDashboard: React.FC = () => {
       {/* 메인 관제판 */}
       <main className="flex-1 relative flex flex-col bg-[#020617]">
         <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:40px_40px] opacity-10"></div>
-        
+
         <header className="h-16 flex items-center justify-between px-10 border-b border-white/5 bg-[#020617]/90 backdrop-blur-md z-30">
           <div>
             <h2 className="text-xs font-black text-white tracking-[0.15em] uppercase">Enterprise Risk Topology (7 Core Assets)</h2>
@@ -199,9 +199,9 @@ const MonitoringDashboard: React.FC = () => {
 
               return (
                 <g key={i}>
-                  <line 
-                    x1={from.x} y1={from.y} x2={to.x} y2={to.y} 
-                    stroke={isDanger ? "#f43f5e" : "#1e293b"} 
+                  <line
+                    x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+                    stroke={isDanger ? "#f43f5e" : "#1e293b"}
                     strokeWidth={isDanger ? "0.6" : "0.3"}
                     strokeDasharray={isDanger ? "1, 1" : "none"}
                     className={isDanger ? "animate-[dash_1s_linear_infinite]" : ""}
@@ -217,10 +217,10 @@ const MonitoringDashboard: React.FC = () => {
                 {node.status !== HurdleStatus.PASS && (
                   <circle cx={node.x} cy={node.y} r={node.type === 'ASSET' ? '5' : '3.5'} fill={node.status === HurdleStatus.FAIL ? 'rgba(244, 63, 94, 0.2)' : 'rgba(245, 158, 11, 0.2)'} className="animate-pulse" />
                 )}
-                <rect 
-                  x={node.x - (node.type === 'ASSET' ? 5 : 4)} y={node.y - 2.5} 
+                <rect
+                  x={node.x - (node.type === 'ASSET' ? 5 : 4)} y={node.y - 2.5}
                   width={node.type === 'ASSET' ? 10 : 8} height="5" rx="1"
-                  fill="#030712" 
+                  fill="#030712"
                   stroke={node.status === HurdleStatus.FAIL ? "#f43f5e" : node.status === HurdleStatus.WARNING ? "#f59e0b" : "#3b82f6"}
                   strokeWidth="0.4"
                   className="transition-all duration-500"

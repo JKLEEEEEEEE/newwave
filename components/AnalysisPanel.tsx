@@ -16,7 +16,7 @@ const AnalysisPanel: React.FC<Props> = ({ data }) => {
     const handleScroll = () => {
       const container = document.getElementById('analysis-scroll-container');
       if (!container) return;
-      
+
       for (const module of modules) {
         const el = document.getElementById(`section-${module.id}`);
         if (el) {
@@ -41,56 +41,48 @@ const AnalysisPanel: React.FC<Props> = ({ data }) => {
     <div className="flex h-full bg-white font-sans text-slate-900">
       {/* 1. Left Sidebar Navigation */}
       <aside className="w-64 border-r border-slate-200 bg-slate-50 flex flex-col shrink-0">
-        <div className="p-6 border-b border-slate-200 bg-white shadow-sm">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Quality Score</p>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-4xl font-black ${data.verdict.totalScore < 60 ? 'text-rose-600' : 'text-[#003366]'}`}>{verdict.totalScore}</span>
-            <span className="text-sm font-bold text-slate-400">/ 100</span>
-          </div>
-        </div>
+
         <nav className="flex-1 overflow-y-auto py-4">
-          {modules.map((m, idx) => (
-            <button
-              key={m.id}
-              onClick={() => scrollToSection(m.id)}
-              className={`w-full text-left px-6 py-4 flex items-center gap-3 transition-all border-r-4 ${
-                activeModule === m.id 
-                ? 'bg-[#003366]/5 border-[#003366] text-[#003366]' 
-                : 'border-transparent text-slate-500 hover:bg-slate-100'
-              }`}
-            >
-              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black transition-colors ${activeModule === m.id ? 'bg-[#003366] text-white' : 'bg-slate-200 text-slate-500'}`}>
-                {idx + 1}
-              </span>
-              <span className="text-[11px] font-black tracking-tight">{m.title.split('.')[1].trim()}</span>
-            </button>
-          ))}
+          {modules.map((m, idx) => {
+            const mScore = m.details.reduce((acc, d) => acc + d.score, 0);
+            const mMax = m.details.length * 5;
+            return (
+              <button
+                key={m.id}
+                onClick={() => scrollToSection(m.id)}
+                className={`w-full text-left px-6 py-4 flex items-center gap-3 transition-all border-r-4 ${activeModule === m.id
+                  ? 'bg-[#003366]/5 border-[#003366] text-[#003366]'
+                  : 'border-transparent text-slate-500 hover:bg-slate-100'
+                  }`}
+              >
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black transition-colors shrink-0 ${activeModule === m.id ? 'bg-[#003366] text-white' : 'bg-slate-200 text-slate-500'}`}>
+                  {idx + 1}
+                </span>
+                <span className="text-[11px] font-black tracking-tight truncate">{m.title.split('.')[1].trim()}</span>
+                <span className="ml-auto text-[10px] font-bold font-mono opacity-80 whitespace-nowrap">
+                  {mScore} <span className="text-[9px] opacity-60">/ {mMax}</span>
+                </span>
+              </button>
+            );
+          })}
         </nav>
-        <div className="p-6 border-t border-slate-200 space-y-3 bg-white">
-          <button className="w-full py-3.5 bg-[#003366] text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-blue-800 transition-all hover:-translate-y-0.5 active:translate-y-0">
-            심사 승인 상신
-          </button>
-          <button className="w-full py-3 border border-slate-200 text-slate-400 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all">
-            의견서 추가 작성
-          </button>
-        </div>
       </aside>
 
       {/* 2. Main Content Area */}
       <div id="analysis-scroll-container" className="flex-1 overflow-y-auto custom-scrollbar p-12 space-y-20">
-        
+
         <header className="space-y-10">
           <div className="flex justify-between items-start">
             <div>
               <div className="flex items-center gap-3 mb-3">
-                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-                 <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em]">Institutional Intelligence Report</span>
+                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em]">Institutional Intelligence Report</span>
               </div>
-              <h2 className="text-4xl font-black text-[#003366] tracking-tighter leading-tight">투자 자산 정밀 채점표<br/><span className="text-slate-400">Enterprise Due Diligence</span></h2>
+              <h2 className="text-4xl font-black text-[#003366] tracking-tighter leading-tight">투자 자산 정밀 채점표<br /><span className="text-slate-400">Enterprise Due Diligence</span></h2>
             </div>
             <div className="text-right">
               <span className="px-3 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[10px] font-black uppercase block mb-3">SECRET / STRICTLY CONFIDENTIAL</span>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">발행일: 2025.05.14 | 담당: 최환석 대리</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">발행일: {new Date().toISOString().slice(0, 10).replace(/-/g, '.')} | 담당: 최환석 대리</span>
             </div>
           </div>
 
@@ -99,6 +91,23 @@ const AnalysisPanel: React.FC<Props> = ({ data }) => {
             <SummaryStat label="Sponsor" value={dealInfo.sponsor} />
             <SummaryStat label="Deal Size" value={dealInfo.dealSize} />
             <SummaryStat label="Target Equity" value={dealInfo.equity} />
+          </div>
+
+          {/* Total Score Display */}
+          <div className="bg-[#003366] rounded-3xl p-8 text-white flex items-center justify-between shadow-lg relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-16 -mt-16"></div>
+            <div>
+              <p className="text-[10px] font-black text-blue-200 uppercase tracking-widest mb-1 opacity-80">Total Analysis Score</p>
+              <h2 className="text-3xl font-black tracking-tight">종합 평가 점수</h2>
+            </div>
+            <div className="flex items-baseline gap-3 relative z-10">
+              <span className="text-5xl font-black tracking-tighter shadow-black drop-shadow-lg">
+                {modules.reduce((acc, m) => acc + m.details.reduce((s, d) => s + d.score, 0), 0)}
+              </span>
+              <span className="text-xl font-bold text-blue-200/60">
+                / {modules.reduce((acc, m) => acc + m.details.length * 5, 0)}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -113,7 +122,10 @@ const AnalysisPanel: React.FC<Props> = ({ data }) => {
               <div className="flex items-center gap-6">
                 <div className="text-right">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Module Grade</p>
-                  <p className="text-2xl font-black text-[#003366]">{module.totalScore.toFixed(1)}<span className="text-xs text-slate-300 ml-1">/ 5.0</span></p>
+                  <p className="text-2xl font-black text-[#003366]">
+                    {module.details.reduce((acc, d) => acc + d.score, 0)}
+                    <span className="text-xs text-slate-300 ml-1">/ {module.details.length * 5}</span>
+                  </p>
                 </div>
               </div>
             </div>
@@ -147,28 +159,28 @@ const AnalysisPanel: React.FC<Props> = ({ data }) => {
                       </td>
                       <td className="px-8 py-7">
                         <div className="flex flex-col items-end gap-3 w-full">
-                           <div className="w-full max-w-[280px] h-1.5 bg-slate-100 rounded-full relative">
-                              {/* Central Benchmark Line (Score 3) */}
-                              <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-slate-200 z-0"></div>
-                              
-                              {/* Score Track */}
-                              <div 
-                                className={`absolute left-0 top-0 bottom-0 rounded-full transition-all duration-1000 ease-out ${detail.score >= 4 ? 'bg-[#003366]' : detail.score <= 2 ? 'bg-rose-500' : 'bg-amber-400'}`}
-                                style={{ width: `${((detail.score - 1) / 4) * 100}%` }}
-                              ></div>
+                          <div className="w-full max-w-[280px] h-1.5 bg-slate-100 rounded-full relative">
+                            {/* Central Benchmark Line (Score 3) */}
+                            <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-slate-200 z-0"></div>
 
-                              {/* Handle / Pin */}
-                              <div 
-                                className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white shadow-lg transition-all duration-1000 ease-out ${detail.score >= 4 ? 'bg-[#003366] shadow-blue-500/40' : detail.score <= 2 ? 'bg-rose-500 shadow-rose-500/40' : 'bg-amber-400 shadow-amber-500/40'}`}
-                                style={{ left: `calc(${((detail.score - 1) / 4) * 100}% - 8px)` }}
-                              >
-                                <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-black text-slate-900">{detail.score}</div>
-                              </div>
-                           </div>
-                           <div className="w-full max-w-[280px] flex justify-between px-0.5">
-                              <span className="text-[8px] font-black text-slate-300 uppercase tracking-tighter">Min 1.0</span>
-                              <span className="text-[8px] font-black text-slate-300 uppercase tracking-tighter">Max 5.0</span>
-                           </div>
+                            {/* Score Track */}
+                            <div
+                              className={`absolute left-0 top-0 bottom-0 rounded-full transition-all duration-1000 ease-out ${detail.score >= 4 ? 'bg-[#003366]' : detail.score <= 2 ? 'bg-rose-500' : 'bg-amber-400'}`}
+                              style={{ width: `${((detail.score - 1) / 4) * 100}%` }}
+                            ></div>
+
+                            {/* Handle / Pin */}
+                            <div
+                              className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white shadow-lg transition-all duration-1000 ease-out ${detail.score >= 4 ? 'bg-[#003366] shadow-blue-500/40' : detail.score <= 2 ? 'bg-rose-500 shadow-rose-500/40' : 'bg-amber-400 shadow-amber-500/40'}`}
+                              style={{ left: `calc(${((detail.score - 1) / 4) * 100}% - 8px)` }}
+                            >
+                              <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-black text-slate-900">{detail.score}</div>
+                            </div>
+                          </div>
+                          <div className="w-full max-w-[280px] flex justify-between px-0.5">
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-tighter">Min 1.0</span>
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-tighter">Max 5.0</span>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -181,30 +193,27 @@ const AnalysisPanel: React.FC<Props> = ({ data }) => {
 
         {/* Executive Verdict Section */}
         <section className="bg-slate-50 border border-slate-200 rounded-[40px] p-16 relative overflow-hidden group">
-           <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-[#003366]/5 rounded-full blur-3xl group-hover:bg-[#003366]/10 transition-all duration-1000"></div>
-           <div className="max-w-3xl mx-auto space-y-10 relative z-10">
-              <div className="flex items-center gap-6">
-                 <div className="w-20 h-20 rounded-3xl bg-[#003366] flex items-center justify-center text-white text-3xl font-black shadow-2xl shadow-blue-900/40">JB</div>
-                 <div>
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.5em] mb-2">Investment Committee Summary</h4>
-                    <h3 className="text-4xl font-black text-[#003366] tracking-tighter">{verdict.status}</h3>
-                 </div>
+          <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-[#003366]/5 rounded-full blur-3xl group-hover:bg-[#003366]/10 transition-all duration-1000"></div>
+          <div className="max-w-3xl mx-auto space-y-10 relative z-10">
+            <div className="flex items-center gap-6">
+              <div className="w-20 h-20 rounded-3xl bg-[#003366] flex items-center justify-center text-white text-3xl font-black shadow-2xl shadow-blue-900/40">JB</div>
+              <div>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.5em] mb-2">Investment Committee Summary</h4>
+                <h3 className="text-4xl font-black text-[#003366] tracking-tighter">{verdict.status}</h3>
               </div>
-              <div className="bg-white p-10 rounded-3xl border border-slate-100 shadow-xl relative overflow-hidden">
-                 <div className="absolute top-0 left-0 w-2.5 h-full bg-[#003366]"></div>
-                 <p className="text-xl text-slate-600 leading-relaxed font-medium italic">
-                   "{verdict.description}"
-                 </p>
-              </div>
-              <div className="grid grid-cols-2 gap-8 pt-6">
-                 <button className="py-5 bg-[#003366] text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl hover:scale-[1.03] transition-all active:scale-100">
-                    최종 심사 승인 상신 (Group Approval)
-                 </button>
-                 <button className="py-5 bg-white border-2 border-slate-200 text-slate-500 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] hover:bg-slate-100 transition-all">
-                    상세 심사 보고서(PDF) 생성
-                 </button>
-              </div>
-           </div>
+            </div>
+            <div className="bg-white p-10 rounded-3xl border border-slate-100 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-2.5 h-full bg-[#003366]"></div>
+              <p className="text-xl text-slate-600 leading-relaxed font-medium italic">
+                "{verdict.description}"
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-8 pt-6">
+              <button className="py-5 bg-[#003366] text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl hover:scale-[1.03] transition-all active:scale-100">
+                최종 심사 승인 상신 (Group Approval)
+              </button>
+            </div>
+          </div>
         </section>
       </div>
     </div>
