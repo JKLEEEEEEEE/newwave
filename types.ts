@@ -63,6 +63,7 @@ export interface DealSummary {
   lastSignal: string;
   lastUpdated: string;
   totalScore?: number;
+  maxScore?: number;
 }
 
 export interface GlobalAlert {
@@ -102,10 +103,33 @@ export interface VerificationData {
   timeline: TimelineEvent[];
 }
 
+
 export interface MonitoringData {
   dealName: string;
   activeTrigger: string | null;
   status: HurdleStatus;
   nodes: DealNode[];
   edges: DealEdge[];
+}
+
+export interface APIScoringResult {
+  run: {
+    id: number;
+    file_name: string;
+    total_score: number;
+    project_summary: {
+      industry_overview_highlights: string[];
+      deal_structure_financing_plan: string[];
+      risk_factors_mitigation: string[];
+    };
+  };
+  results: {
+    item_key: string;
+    item_name: string;
+    extracted_value: string;
+    score_raw: number;
+    evidence_text: string;
+    module_id: number;
+    module_name: string;
+  }[];
 }
