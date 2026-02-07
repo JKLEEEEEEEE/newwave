@@ -134,8 +134,22 @@ function DealListLevel() {
 
   if (dealsLoading) {
     return (
-      <div className="text-slate-400 text-center py-12">
-        딜 목록 로딩 중...
+      <div className="space-y-6">
+        <div className="h-6 w-40 bg-slate-700/50 rounded animate-pulse" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-slate-900/40 border border-white/5 rounded-2xl p-5 space-y-3">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 space-y-2">
+                  <div className="h-5 w-32 bg-slate-700/40 rounded animate-pulse" />
+                  <div className="h-3.5 w-24 bg-slate-700/30 rounded animate-pulse" />
+                  <div className="h-3 w-40 bg-slate-700/20 rounded animate-pulse mt-2" />
+                </div>
+                <div className="w-[60px] h-[60px] rounded-full bg-slate-800/50 animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -202,8 +216,30 @@ function CompanyDetailLevel({
 
   if (dealDetailLoading) {
     return (
-      <div className="text-slate-400 text-center py-12">
-        로딩 중...
+      <div className="space-y-6">
+        {/* 기업 정보 스켈레톤 */}
+        <div className="bg-slate-900/40 border border-white/5 rounded-2xl p-6 space-y-4">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-full bg-slate-800/50 animate-pulse" />
+            <div className="flex-1 space-y-2">
+              <div className="h-5 w-40 bg-slate-700/40 rounded animate-pulse" />
+              <div className="h-3.5 w-28 bg-slate-700/30 rounded animate-pulse" />
+            </div>
+          </div>
+        </div>
+        {/* 카테고리 그리드 스켈레톤 */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          {[...Array(10)].map((_, i) => (
+            <div key={i} className="bg-slate-900/40 border border-white/5 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-slate-700/40 animate-pulse" />
+                <div className="h-3.5 w-16 bg-slate-700/30 rounded animate-pulse" />
+              </div>
+              <div className="h-1.5 w-full bg-slate-700/30 rounded-full animate-pulse" />
+              <div className="h-3 w-12 bg-slate-700/20 rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -432,8 +468,20 @@ function CategoryDetailLevel({
 
   if (loading) {
     return (
-      <div className="text-slate-400 text-center py-12">
-        엔티티 로딩 중...
+      <div className="space-y-4">
+        <div className="h-5 w-36 bg-slate-700/50 rounded animate-pulse" />
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className="bg-slate-900/40 border border-white/5 rounded-2xl p-4 space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-slate-700/40 animate-pulse" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3.5 w-32 bg-slate-700/40 rounded animate-pulse" />
+                <div className="h-2.5 w-48 bg-slate-700/25 rounded animate-pulse" />
+              </div>
+              <div className="h-6 w-12 bg-slate-700/30 rounded-full animate-pulse" />
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -651,8 +699,25 @@ function EntityDetailLevel({
 
   if (loading) {
     return (
-      <div className="text-slate-400 text-center py-12">
-        이벤트 로딩 중...
+      <div className="space-y-4">
+        <div className="h-5 w-36 bg-slate-700/50 rounded animate-pulse" />
+        {/* 타임라인 스켈레톤 */}
+        <div className="relative pl-6 border-l-2 border-slate-700/30 space-y-4">
+          {[1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="relative">
+              <div className="absolute -left-[calc(0.75rem+1px)] w-3 h-3 rounded-full bg-slate-700/40 animate-pulse" />
+              <div className="bg-slate-900/40 border border-white/5 rounded-xl p-3 space-y-2 ml-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-2.5 w-16 bg-slate-700/30 rounded animate-pulse" />
+                  <div className="h-4 w-12 bg-slate-700/30 rounded-full animate-pulse" />
+                </div>
+                <div className="h-3.5 w-[70%] bg-slate-700/40 rounded animate-pulse" />
+                <div className="h-2.5 w-full bg-slate-700/25 rounded animate-pulse" />
+                <div className="h-2.5 w-[85%] bg-slate-700/20 rounded animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

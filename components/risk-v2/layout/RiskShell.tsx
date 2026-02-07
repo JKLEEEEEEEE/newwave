@@ -4,17 +4,14 @@
  * 구조:
  *   <RiskV2Provider>
  *     <NavigationBar />
- *     <main> (뷰 전환 with AnimatePresence)
- *       - CommandCenter
- *       - SupplyChainXRay
- *       - RiskDeepDive
- *       - WarRoom
- *     </main>
- *     <aside> (AICopilotPanel 슬라이딩 패널)
+ *     <div.content-area> (relative 컨테이너)
+ *       <main> (뷰 전환 with AnimatePresence)
+ *       <aside> (AICopilotPanel 슬라이딩 패널)
+ *     </div>
  *     <footer> (Powered by 상태바)
  *   </RiskV2Provider>
  *
- * framer-motion이 없으면 일반 div로 폴백
+ * aside는 content-area 내 absolute 위치 → 상위 앱 Header/ApiStatusBar와 무관하게 정확히 배치
  */
 
 import React from 'react';
@@ -53,8 +50,9 @@ function RiskShellInner() {
       {/* 상단 네비게이션 */}
       <NavigationBar />
 
-      {/* 메인 컨텐츠 영역 */}
-      <main className="flex-1 overflow-hidden relative">
+      {/* 컨텐츠 영역 (main + aside의 공통 relative 컨테이너) */}
+      <div className="flex-1 overflow-hidden relative">
+        {/* 메인 컨텐츠 */}
         <AnimatePresence mode="wait">
           <motion.div
             key={activeView}
@@ -69,23 +67,20 @@ function RiskShellInner() {
             </div>
           </motion.div>
         </AnimatePresence>
-      </main>
 
-      {/* AI Copilot 슬라이딩 패널 */}
-      <aside
-        className={`
-          fixed top-0 right-0 h-full z-40
-          bg-slate-900/95 backdrop-blur-xl border-l border-white/5
-          transition-transform duration-300 ease-out
-          ${copilotOpen ? 'translate-x-0' : 'translate-x-full'}
-        `}
-        style={{
-          width: LAYOUT.sidePanelWidth,
-          top: LAYOUT.navHeight,
-        }}
-      >
-        <AICopilotPanel />
-      </aside>
+        {/* AI Copilot 슬라이딩 패널 - absolute로 content area 내부 배치 */}
+        <aside
+          className={`
+            absolute top-0 right-0 bottom-0 z-40
+            bg-slate-900/95 backdrop-blur-xl border-l border-white/5
+            transition-transform duration-300 ease-out
+            ${copilotOpen ? 'translate-x-0' : 'translate-x-full'}
+          `}
+          style={{ width: LAYOUT.sidePanelWidth }}
+        >
+          <AICopilotPanel />
+        </aside>
+      </div>
 
       {/* 하단 상태바 */}
       <footer

@@ -378,3 +378,78 @@ export type RiskV2Action =
   | { type: 'SET_DEAL_DETAIL'; payload: DealDetailResponseV2 | null }
   | { type: 'SET_DEAL_DETAIL_LOADING'; payload: boolean }
   | { type: 'SET_RECENT_EVENTS'; payload: RiskEventV2[] };
+
+// ============================================
+// AI Briefing 타입
+// ============================================
+
+/** 리스크 기여 드라이버 */
+export interface RiskDriver {
+  categoryCode: string;
+  categoryName: string;
+  categoryIcon: string;
+  score: number;
+  weight: number;
+  weightedScore: number;
+  contribution: number;
+  eventCount: number;
+  isPropagated: boolean;
+}
+
+/** 리스크 드라이버 응답 */
+export interface RiskDriversResponse {
+  companyName: string;
+  totalScore: number;
+  directScore: number;
+  propagatedScore: number;
+  riskLevel: RiskLevelV2;
+  topDrivers: RiskDriver[];
+  allDrivers: RiskDriver[];
+}
+
+/** What-if 시나리오 프리셋 */
+export interface WhatIfScenario {
+  id: string;
+  name: string;
+  icon: string;
+  impacts: Partial<Record<CategoryCodeV2, number>>;
+}
+
+/** AI 브리핑 응답 */
+export interface BriefingResponse {
+  company: string;
+  riskScore: number;
+  riskLevel: RiskLevelV2;
+  executive_summary: string;
+  context_analysis: {
+    industry_context: string;
+    timing_significance: string;
+  };
+  cross_signal_analysis: {
+    patterns_detected: string[];
+    correlations: string;
+    anomalies: string;
+  };
+  stakeholder_insights: {
+    executive_concerns: string;
+    shareholder_dynamics: string;
+  };
+  key_concerns: {
+    issue: string;
+    why_it_matters: string;
+    watch_for: string;
+  }[];
+  recommendations: {
+    immediate_actions: string[];
+    monitoring_focus: string[];
+    due_diligence_points: string[];
+  };
+  confidence: number;
+  analysis_limitations: string;
+  dataSources?: {
+    newsCount: number;
+    disclosureCount: number;
+    relatedCompanyCount: number;
+    categoryCount: number;
+  };
+}

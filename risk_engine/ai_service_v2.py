@@ -218,7 +218,7 @@ class AIServiceV2:
     # 3. Text2Cypher
     # ========================================
     def text_to_cypher(self, natural_query: str) -> Dict[str, Any]:
-        """자연어 → Cypher 쿼리 변환"""
+        """자연어 → Cypher 쿼리 변환 (v5 5-Node 스키마)"""
 
         if not self.is_available:
             return self._fallback_text_to_cypher(natural_query)
@@ -226,23 +226,34 @@ class AIServiceV2:
         system_prompt = """당신은 Neo4j Cypher 전문가입니다.
 자연어 질문을 Cypher 쿼리로 변환하세요.
 
-스키마:
-- (:Company {name, corpCode, sector, totalRiskScore, directRiskScore, propagatedRiskScore, status})
-- (:NewsArticle {title, sentiment, riskScore, source, publishedAt})
-- (:Disclosure {title, date, rceptNo})
-- (Company)-[:SUPPLIES_TO {dependency}]->(Company)
-- (Company)-[:COMPETES_WITH]-(Company)
-- (NewsArticle)-[:MENTIONS]->(Company)
-- (Company)-[:HAS_DISCLOSURE]->(Disclosure)
+=== 그래프 스키마 (5-Node Hierarchy) ===
+
+노드:
+- (:Deal {name, targetCompanyName, analyst, status, stage})
+- (:Company {name, sector, market, totalRiskScore, directScore, propagatedScore, riskLevel})
+- (:RiskCategory {code, name, riskScore, weight, weightedScore, eventCount})
+  - code: SHARE, EXEC, CREDIT, LEGAL, GOV, OPS, AUDIT, ESG, SUPPLY, OTHER
+- (:RiskEntity {name, type, position, description, riskScore})
+  - type: PERSON, SHAREHOLDER, CASE, ISSUE
+- (:RiskEvent {title, type, severity, score, source, publishedAt, summary})
+  - type: NEWS, DISCLOSURE, ISSUE
+
+관계:
+- (Deal)-[:TARGET]->(Company)         -- 딜의 메인 기업
+- (Company)-[:HAS_CATEGORY]->(RiskCategory) -- 기업의 10개 리스크 카테고리
+- (Company)-[:HAS_RELATED]->(Company)       -- 관련기업
+- (RiskCategory)-[:HAS_ENTITY]->(RiskEntity) -- 카테고리 내 엔티티
+- (RiskEntity)-[:HAS_EVENT]->(RiskEvent)     -- 엔티티의 이벤트/뉴스
 
 규칙:
-1. 읽기 전용 쿼리만 생성 (MATCH, RETURN, WHERE, ORDER BY만 사용)
+1. 읽기 전용 쿼리만 (MATCH, RETURN, WHERE, ORDER BY, WITH, OPTIONAL MATCH)
 2. DELETE, CREATE, SET, MERGE, REMOVE, DROP 절대 금지
 3. LIMIT 20 기본 적용
+4. 한국어 회사명 사용 (예: 'SK하이닉스', '삼성전자')
 
 정확히 다음 JSON 형식으로 응답:
 {
-  "cypher": "MATCH (c:Company) WHERE ... RETURN ...",
+  "cypher": "MATCH ... RETURN ...",
   "explanation": "쿼리 설명 (한국어)"
 }"""
 
@@ -261,6 +272,38 @@ class AIServiceV2:
             logger.error(f"Text2Cypher 실패: {e}")
             return self._fallback_text_to_cypher(natural_query)
 
+    def generate_answer(self, question: str, cypher: str, results: list) -> str:
+        """Cypher 쿼리 결과를 자연어 답변으로 변환"""
+        if not self.is_available:
+            return self._fallback_answer(question, results)
+
+        results_str = json.dumps(results[:10], ensure_ascii=False, default=str) if results else "결과 없음"
+
+        system_prompt = """당신은 투자 리스크 분석 어시스턴트입니다.
+Neo4j 그래프 DB 쿼리 결과를 바탕으로 사용자 질문에 대한 명확한 한국어 답변을 작성하세요.
+
+규칙:
+1. 결과 데이터를 분석하여 핵심 인사이트를 추출
+2. 간결하고 실용적인 답변 (3-5문장)
+3. 숫자/점수가 있으면 구체적으로 인용
+4. 결과가 없으면 "해당 데이터를 찾을 수 없습니다"라고 안내
+5. 순수 텍스트만 반환 (JSON 아님)"""
+
+        user_msg = f"질문: {question}\nCypher: {cypher}\n결과: {results_str}"
+
+        try:
+            return self._call_gpt(system_prompt, user_msg)
+        except Exception as e:
+            logger.error(f"답변 생성 실패: {e}")
+            return self._fallback_answer(question, results)
+
+    def _fallback_answer(self, question: str, results: list) -> str:
+        """AI 없을 때 결과 기반 간단 답변"""
+        if not results:
+            return "해당 조건에 맞는 데이터를 찾을 수 없습니다. 질문을 다시 확인해주세요."
+        count = len(results)
+        return f"총 {count}건의 결과를 찾았습니다. 상세 내용은 아래 결과 테이블을 확인하세요."
+
     def _validate_cypher_safety(self, cypher: str):
         """Cypher 쿼리 안전성 검증"""
         dangerous_keywords = ["DELETE", "CREATE", "SET ", "MERGE", "REMOVE", "DROP", "DETACH"]
@@ -271,24 +314,38 @@ class AIServiceV2:
                 raise ValueError(f"위험한 쿼리 감지: {keyword} 키워드 사용 불가")
 
     def _fallback_text_to_cypher(self, query: str) -> Dict[str, Any]:
-        """Text2Cypher 폴백"""
-        # 간단한 패턴 매칭
+        """Text2Cypher 폴백 (v5 5-Node 스키마)"""
         query_lower = query.lower()
 
-        if "고위험" in query_lower or "위험" in query_lower:
+        if "법률" in query_lower or "legal" in query_lower:
             return {
-                "cypher": "MATCH (c:Company) WHERE c.totalRiskScore >= 70 RETURN c.name, c.totalRiskScore ORDER BY c.totalRiskScore DESC LIMIT 20",
-                "explanation": "고위험 기업(리스크 점수 70 이상) 조회"
+                "cypher": "MATCH (c:Company)-[:HAS_CATEGORY]->(rc:RiskCategory {code: 'LEGAL'}) RETURN c.name, rc.riskScore, rc.weightedScore, rc.eventCount ORDER BY rc.riskScore DESC LIMIT 20",
+                "explanation": "법률(LEGAL) 카테고리 리스크 점수 조회"
             }
-        elif "공급" in query_lower:
+        elif "공급" in query_lower or "supply" in query_lower:
             return {
-                "cypher": "MATCH (s:Company)-[r:SUPPLIES_TO]->(c:Company) RETURN s.name AS supplier, c.name AS customer, r.dependency LIMIT 20",
-                "explanation": "공급망 관계 조회"
+                "cypher": "MATCH (c:Company)-[:HAS_RELATED]->(rc:Company) RETURN c.name AS main, rc.name AS related, rc.totalRiskScore ORDER BY rc.totalRiskScore DESC LIMIT 20",
+                "explanation": "관련기업(공급망) 리스크 전이 관계 조회"
+            }
+        elif "고위험" in query_lower or "위험" in query_lower or "리스크" in query_lower:
+            return {
+                "cypher": "MATCH (c:Company) RETURN c.name, c.totalRiskScore, c.riskLevel, c.directScore, c.propagatedScore ORDER BY c.totalRiskScore DESC LIMIT 20",
+                "explanation": "기업별 리스크 점수 조회"
+            }
+        elif "임원" in query_lower or "경영" in query_lower or "exec" in query_lower:
+            return {
+                "cypher": "MATCH (c:Company)-[:HAS_CATEGORY]->(rc:RiskCategory {code: 'EXEC'})-[:HAS_ENTITY]->(re:RiskEntity) RETURN c.name, re.name, re.type, re.position, re.riskScore ORDER BY re.riskScore DESC LIMIT 20",
+                "explanation": "경영진(EXEC) 관련 엔티티 조회"
+            }
+        elif "주주" in query_lower or "share" in query_lower:
+            return {
+                "cypher": "MATCH (c:Company)-[:HAS_CATEGORY]->(rc:RiskCategory {code: 'SHARE'})-[:HAS_ENTITY]->(re:RiskEntity) RETURN c.name, re.name, re.type, re.riskScore ORDER BY re.riskScore DESC LIMIT 20",
+                "explanation": "주주(SHARE) 관련 엔티티 조회"
             }
         else:
             return {
-                "cypher": "MATCH (c:Company) RETURN c.name, c.sector, c.totalRiskScore ORDER BY c.totalRiskScore DESC LIMIT 20",
-                "explanation": "기업 목록 조회 (AI 변환 실패로 기본 쿼리 사용)"
+                "cypher": "MATCH (d:Deal)-[:TARGET]->(c:Company) OPTIONAL MATCH (c)-[:HAS_CATEGORY]->(rc:RiskCategory) RETURN d.name AS deal, c.name AS company, c.totalRiskScore, collect(rc.code + ': ' + toString(rc.riskScore))[..5] AS topCategories LIMIT 20",
+                "explanation": "딜 및 메인기업 리스크 요약 조회"
             }
 
     # ========================================

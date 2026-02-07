@@ -20,6 +20,9 @@ import type {
   SimulationResultV2,
   SimulationScenarioV2,
   AIInsightResponseV2,
+  BriefingResponse,
+  RiskDriversResponse,
+  RiskDriver,
   GraphData3D,
   GraphNode3D,
   GraphLink3D,
@@ -82,6 +85,18 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<Api
       timestamp: new Date().toISOString(),
     };
   }
+}
+
+/** GPT 답변에서 JSON 래핑 제거 */
+function cleanAnswer(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return parsed.result || parsed.answer || parsed.text || parsed.content || trimmed;
+    } catch { /* not JSON */ }
+  }
+  return trimmed;
 }
 
 /** 리스크 레벨 판정 */
@@ -634,7 +649,7 @@ async function queryNaturalLanguageV2(question: string): Promise<ApiResponseV2<T
       cypher: d.cypher || '',
       explanation: d.explanation || '',
       results: d.results || [],
-      answer: d.answer || '',
+      answer: cleanAnswer(d.answer || ''),
       visualizationType: d.visualizationType || 'table',
       success: d.success !== false,
     });
@@ -739,6 +754,63 @@ async function fetchAIInsightV2(companyNameOrId: string): Promise<ApiResponseV2<
   });
 }
 
+/** 리스크 드라이버 조회 → GET /api/v4/deals/{dealId}/drivers */
+async function fetchRiskDriversV2(dealId: string): Promise<ApiResponseV2<RiskDriversResponse>> {
+  const res = await fetchApi<any>(`/api/v4/deals/${encodeURIComponent(dealId)}/drivers`);
+  if (res.success && res.data) {
+    const d = res.data;
+    return success({
+      companyName: d.companyName || dealId,
+      totalScore: d.totalScore || 0,
+      directScore: d.directScore || 0,
+      propagatedScore: d.propagatedScore || 0,
+      riskLevel: d.riskLevel || 'PASS',
+      topDrivers: (d.topDrivers || []).map((dr: any) => ({
+        categoryCode: dr.categoryCode || '',
+        categoryName: dr.categoryName || '',
+        categoryIcon: dr.categoryIcon || '',
+        score: dr.score || 0,
+        weight: dr.weight || 0,
+        weightedScore: dr.weightedScore || 0,
+        contribution: dr.contribution || 0,
+        eventCount: dr.eventCount || 0,
+        isPropagated: dr.isPropagated || false,
+      })),
+      allDrivers: (d.allDrivers || []).map((dr: any) => ({
+        categoryCode: dr.categoryCode || '',
+        categoryName: dr.categoryName || '',
+        categoryIcon: dr.categoryIcon || '',
+        score: dr.score || 0,
+        weight: dr.weight || 0,
+        weightedScore: dr.weightedScore || 0,
+        contribution: dr.contribution || 0,
+        eventCount: dr.eventCount || 0,
+        isPropagated: dr.isPropagated || false,
+      })),
+    });
+  }
+  return {
+    success: false,
+    data: { companyName: dealId, totalScore: 0, directScore: 0, propagatedScore: 0, riskLevel: 'PASS', topDrivers: [], allDrivers: [] },
+    error: res.error || 'Failed to fetch risk drivers',
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** AI 브리핑 조회 */
+async function fetchBriefingV2(dealId: string): Promise<ApiResponseV2<BriefingResponse>> {
+  const url = `${BASE_URL}/api/v4/deals/${encodeURIComponent(dealId)}/briefing`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return { success: true, data, timestamp: new Date().toISOString() };
+  } catch (err) {
+    console.error('[fetchBriefingV2]', err);
+    return { success: false, data: null as any, error: String(err), timestamp: new Date().toISOString() };
+  }
+}
+
 // ============================================
 // 건강 체크
 // ============================================
@@ -779,8 +851,10 @@ export const riskApiV2 = {
   fetchScenarios: fetchScenariosV2,
   runSimulation: runSimulationV2,
   // AI
+  fetchRiskDrivers: fetchRiskDriversV2,
   queryNaturalLanguage: queryNaturalLanguageV2,
   fetchAIInsight: fetchAIInsightV2,
+  fetchBriefing: fetchBriefingV2,
   // 유틸
   checkApiHealth: checkApiHealthV2,
   // 상태

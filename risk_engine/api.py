@@ -747,12 +747,21 @@ async def ai_query(request: Text2CypherRequest):
 
             # 쿼리 실행
             if NEO4J_CLIENT_AVAILABLE and not parsed.get("error"):
-                results = neo4j_client.execute_read(parsed["cypher"])
+                cypher = parsed["cypher"]
+                results = neo4j_client.execute_read(cypher)
+
+                # 자연어 답변 생성
+                answer = await asyncio.to_thread(
+                    ai_service_v2.generate_answer,
+                    request.question, cypher, results or []
+                )
+
                 return {
                     "question": request.question,
-                    "cypher": parsed["cypher"],
+                    "cypher": cypher,
                     "explanation": parsed["explanation"],
                     "results": results,
+                    "answer": answer,
                     "success": True
                 }
             else:
@@ -761,6 +770,7 @@ async def ai_query(request: Text2CypherRequest):
                     "cypher": parsed.get("cypher"),
                     "explanation": parsed.get("explanation"),
                     "results": None,
+                    "answer": parsed.get("explanation", "쿼리를 실행할 수 없습니다."),
                     "success": not parsed.get("error", False)
                 }
         except Exception as e:

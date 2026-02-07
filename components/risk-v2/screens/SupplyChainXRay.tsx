@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import SpriteText from 'three-spritetext';
 
 // 타입
-import type { GraphNode3D, GraphLink3D, CompanyV2, RiskCategoryV2 } from '../types-v2';
+import type { GraphNode3D, GraphLink3D, CompanyV2, RiskCategoryV2, RiskDriver, CategoryCodeV2, WhatIfScenario } from '../types-v2';
 
 // 디자인 토큰
 import { GRADIENTS } from '../design-tokens';
@@ -104,6 +104,17 @@ function getLinkCascadeStep(relationship: string): number {
 // 사이드 패널 너비 상수
 // ============================================
 const SIDE_PANEL_WIDTH = 280;
+
+// ============================================
+// What-if 시나리오 프리셋 (5개)
+// ============================================
+const WHATIF_SCENARIOS: WhatIfScenario[] = [
+  { id: 'legal_crisis', name: '법률 위기', icon: '\u2696\uFE0F', impacts: { LEGAL: 50, GOV: 20 } },
+  { id: 'supply_disruption', name: '공급망 단절', icon: '\uD83D\uDEA2', impacts: { SUPPLY: 60, OPS: 30 } },
+  { id: 'credit_downgrade', name: '신용 하락', icon: '\uD83D\uDCC9', impacts: { CREDIT: 40, SHARE: 15 } },
+  { id: 'exec_scandal', name: '경영진 스캔들', icon: '\uD83D\uDC64', impacts: { EXEC: 50, GOV: 30, ESG: 20 } },
+  { id: 'esg_violation', name: 'ESG 위반', icon: '\uD83C\uDF0D', impacts: { ESG: 50, LEGAL: 15 } },
+];
 
 // ============================================
 // Step 7: 캐스케이드 모드 타입
@@ -209,6 +220,20 @@ export default function SupplyChainXRay() {
 
   // --- 선택된 링크 ---
   const [selectedLink, setSelectedLink] = useState<GraphLink3D | null>(null);
+
+  // --- Top Drivers ---
+  const [topDrivers, setTopDrivers] = useState<RiskDriver[]>([]);
+  const [driversLoading, setDriversLoading] = useState(false);
+
+  // --- What-if Simulation ---
+  const [whatIfScenario, setWhatIfScenario] = useState<string>('');
+  const [whatIfResult, setWhatIfResult] = useState<{
+    beforeScore: number;
+    afterScore: number;
+    delta: number;
+    affectedCategories: { code: string; name: string; before: number; after: number }[];
+  } | null>(null);
+  const [whatIfActive, setWhatIfActive] = useState(false);
 
   // ============================================
   // Step 7: 캐스케이드 시뮬레이션 상태 + 로직
@@ -345,6 +370,76 @@ export default function SupplyChainXRay() {
   const handleNodeClick = useCallback((node: FGNode) => {
     setSelectedNode(prev => prev?.id === node.id ? null : node);
     setShowAllConnections(false);
+  }, []);
+
+  // --- Top Drivers auto-fetch when selectedNode changes ---
+  useEffect(() => {
+    if (selectedNode && (selectedNode.nodeType === 'mainCompany' || selectedNode.nodeType === 'relatedCompany')) {
+      setDriversLoading(true);
+      setTopDrivers([]);
+      riskApiV2.fetchRiskDrivers(selectedNode.id).then(res => {
+        if (res.success && res.data?.topDrivers) {
+          setTopDrivers(res.data.topDrivers);
+        }
+        setDriversLoading(false);
+      });
+    } else {
+      setTopDrivers([]);
+    }
+  }, [selectedNode?.id]);
+
+  // --- What-if 시뮬레이션 실행 (클라이언트 사이드) ---
+  const runWhatIf = useCallback((scenarioId: string) => {
+    const scenario = WHATIF_SCENARIOS.find(s => s.id === scenarioId);
+    if (!scenario || !filteredGraphData.nodes.length) return;
+
+    // 현재 카테고리 노드에서 점수 추출
+    const mainCompanyNode = filteredGraphData.nodes.find(n => n.nodeType === 'mainCompany');
+    if (!mainCompanyNode) return;
+    const mainId = mainCompanyNode.id;
+
+    const categoryNodes = filteredGraphData.nodes.filter(
+      n => n.nodeType === 'riskCategory' && n.id.startsWith(`RC_${mainId}_`)
+    );
+
+    let newDirectScore = 0;
+    const affected: { code: string; name: string; before: number; after: number }[] = [];
+
+    for (const cat of categoryNodes) {
+      const code = cat.categoryCode || cat.id.split('_').pop() || '';
+      const currentScore = cat.riskScore || 0;
+      const weight = (cat.metadata?.weight as number) || 0;
+      const impact = scenario.impacts[code as CategoryCodeV2] || 0;
+      const newScore = currentScore + impact;
+      const newWeighted = newScore * weight;
+      newDirectScore += newWeighted;
+
+      if (impact > 0) {
+        affected.push({ code, name: cat.name, before: currentScore, after: newScore });
+      }
+    }
+
+    // 전이 점수 (기존 유지)
+    const propScore = mainCompanyNode.metadata?.directScore
+      ? (mainCompanyNode.riskScore - (mainCompanyNode.metadata.directScore as number))
+      : 0;
+    const afterTotal = Math.round(newDirectScore + Math.max(0, propScore));
+    const beforeTotal = mainCompanyNode.riskScore;
+
+    setWhatIfResult({
+      beforeScore: beforeTotal,
+      afterScore: afterTotal,
+      delta: afterTotal - beforeTotal,
+      affectedCategories: affected,
+    });
+    setWhatIfActive(true);
+  }, [filteredGraphData]);
+
+  // What-if 초기화
+  const resetWhatIf = useCallback(() => {
+    setWhatIfScenario('');
+    setWhatIfResult(null);
+    setWhatIfActive(false);
   }, []);
 
   // --- 노드 라벨 콜백 (U2: 리치 HTML 툴팁) ---
@@ -497,12 +592,34 @@ export default function SupplyChainXRay() {
       {/* 1. 3D 그래프 (전체 배경) */}
       {/* ============================================ */}
       <div className="absolute inset-0 z-0 overflow-hidden">
-        {/* U7: 로딩 스피너 */}
+        {/* U7: 그래프 로딩 스켈레톤 */}
         {graphLoading && selectedDealId && (
           <div className="absolute inset-0 flex items-center justify-center z-[5]">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-10 h-10 border-2 border-purple-500/30 border-t-purple-400 rounded-full animate-spin" />
-              <p className="text-slate-400 text-sm">그래프 데이터 로딩 중...</p>
+            <div className="flex flex-col items-center gap-4">
+              {/* 노드 연결 애니메이션 */}
+              <div className="relative w-32 h-32">
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full bg-purple-500/20 border border-purple-500/30 animate-pulse" />
+                </div>
+                {[0, 60, 120, 180, 240, 300].map((deg, i) => (
+                  <div
+                    key={i}
+                    className="absolute w-5 h-5 rounded-full bg-slate-700/40 animate-pulse"
+                    style={{
+                      top: `${50 + 40 * Math.sin((deg * Math.PI) / 180)}%`,
+                      left: `${50 + 40 * Math.cos((deg * Math.PI) / 180)}%`,
+                      transform: 'translate(-50%, -50%)',
+                      animationDelay: `${i * 150}ms`,
+                    }}
+                  />
+                ))}
+                <div className="absolute inset-0 border-2 border-purple-500/10 rounded-full animate-spin"
+                  style={{ animationDuration: '3s' }} />
+              </div>
+              <div className="text-center space-y-1">
+                <p className="text-slate-300 text-sm font-medium">그래프 데이터 로딩 중</p>
+                <p className="text-slate-500 text-xs">Neo4j에서 노드와 관계를 가져오고 있습니다</p>
+              </div>
             </div>
           </div>
         )}
@@ -553,48 +670,34 @@ export default function SupplyChainXRay() {
               }}
             />
           </div>
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="text-center"
-            >
-              <div className="text-6xl mb-4 opacity-30">&#128269;</div>
-              <p className="text-slate-500 text-lg">
-                좌측 패널에서 딜을 선택하세요
-              </p>
-              <p className="text-slate-600 text-sm mt-2">
-                3D 그래프로 리스크 전이를 시각화합니다
-              </p>
-            </motion.div>
-          </div>
-        )}
+        ) : null}
       </div>
 
       {/* ============================================ */}
-      {/* Step 14: 상단 뱃지 (activeFlowCount) */}
+      {/* Step 14: 상단 뱃지 (activeFlowCount) - 딜 선택 시에만 */}
       {/* ============================================ */}
-      <motion.div
-        className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 pointer-events-auto"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-      >
-        <GlassCard className="px-4 py-2">
-          <div className="flex items-center gap-3">
-            <span className="text-purple-400 text-xs font-medium">Real-time Risk Propagation</span>
-            {activeFlowCount > 0 && (
-              <>
-                <span className="text-slate-500 text-xs">|</span>
-                <span className="text-red-400 text-xs">
-                  &#9679; {activeFlowCount} active flows
-                </span>
-              </>
-            )}
-          </div>
-        </GlassCard>
-      </motion.div>
+      {selectedDealId && filteredGraphData.nodes.length > 0 && !graphLoading && (
+        <motion.div
+          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 pointer-events-auto"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          <GlassCard className="px-4 py-2">
+            <div className="flex items-center gap-3">
+              <span className="text-purple-400 text-xs font-medium">Real-time Risk Propagation</span>
+              {activeFlowCount > 0 && (
+                <>
+                  <span className="text-slate-500 text-xs">|</span>
+                  <span className="text-red-400 text-xs">
+                    &#9679; {activeFlowCount} active flows
+                  </span>
+                </>
+              )}
+            </div>
+          </GlassCard>
+        </motion.div>
+      )}
 
       {/* ============================================ */}
       {/* 2. 좌측 사이드 패널 */}
@@ -632,6 +735,19 @@ export default function SupplyChainXRay() {
               ))}
             </select>
           </div>
+
+          {/* 딜 미선택 안내 */}
+          {!selectedDealId && (
+            <div className="flex flex-col items-center py-8 text-center">
+              <div className="w-12 h-12 rounded-full bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mb-3">
+                <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                </svg>
+              </div>
+              <p className="text-slate-400 text-sm font-medium">딜을 선택하세요</p>
+              <p className="text-slate-600 text-xs mt-1">3D 그래프로 리스크 전이를 시각화합니다</p>
+            </div>
+          )}
 
           {/* 선택된 딜 메인 기업 요약 */}
           {mainCompany && (
@@ -739,6 +855,104 @@ export default function SupplyChainXRay() {
                   >
                     {'\u2715'} 초기화
                   </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ============================================ */}
+          {/* What-if Simulation */}
+          {/* ============================================ */}
+          {filteredGraphData.nodes.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-xs text-slate-500 font-semibold mb-2 uppercase tracking-wider">
+                What-if Simulation
+              </h3>
+              <div className="p-3 rounded-xl bg-slate-800/40 border border-white/5 space-y-3">
+                {/* 시나리오 선택 */}
+                <select
+                  className="w-full bg-slate-900/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+                  value={whatIfScenario}
+                  onChange={(e) => setWhatIfScenario(e.target.value)}
+                >
+                  <option value="" className="bg-slate-900">-- 시나리오 선택 --</option>
+                  {WHATIF_SCENARIOS.map(s => (
+                    <option key={s.id} value={s.id} className="bg-slate-900">
+                      {s.icon} {s.name}
+                    </option>
+                  ))}
+                </select>
+
+                {/* 실행/초기화 버튼 */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => whatIfScenario && runWhatIf(whatIfScenario)}
+                    disabled={!whatIfScenario}
+                    className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border ${
+                      whatIfScenario
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 hover:bg-amber-500/30'
+                        : 'bg-slate-800/30 text-slate-600 border-white/5 cursor-not-allowed'
+                    }`}
+                  >
+                    &#9889; 실행
+                  </button>
+                  {whatIfActive && (
+                    <button
+                      onClick={resetWhatIf}
+                      className="px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors border border-white/5"
+                    >
+                      &#10005;
+                    </button>
+                  )}
+                </div>
+
+                {/* 결과 카드 */}
+                {whatIfResult && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-3 rounded-xl bg-slate-900/60 border border-amber-500/20 space-y-3"
+                  >
+                    {/* Before / After */}
+                    <div className="flex items-center justify-between">
+                      <div className="text-center">
+                        <p className="text-[10px] text-slate-500 mb-0.5">Before</p>
+                        <p className="text-lg font-bold text-white">{whatIfResult.beforeScore}</p>
+                      </div>
+                      <div className="text-center px-3">
+                        <span className="text-xl text-slate-500">&#8594;</span>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] text-slate-500 mb-0.5">After</p>
+                        <p className={`text-lg font-bold ${whatIfResult.afterScore >= 50 ? 'text-red-400' : whatIfResult.afterScore >= 30 ? 'text-yellow-400' : 'text-green-400'}`}>
+                          {whatIfResult.afterScore}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] text-slate-500 mb-0.5">Delta</p>
+                        <p className={`text-lg font-bold ${whatIfResult.delta > 0 ? 'text-red-400' : 'text-green-400'}`}>
+                          {whatIfResult.delta > 0 ? '+' : ''}{whatIfResult.delta}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 영향 카테고리 */}
+                    {whatIfResult.affectedCategories.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] text-slate-500">영향 카테고리</p>
+                        {whatIfResult.affectedCategories.map((ac, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300">{ac.name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-slate-500">{ac.before}</span>
+                              <span className="text-slate-600">&#8594;</span>
+                              <span className="text-red-400 font-medium">{ac.after}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </motion.div>
                 )}
               </div>
             </div>
@@ -1004,6 +1218,69 @@ export default function SupplyChainXRay() {
                 )}
               </div>
             </div>
+
+            {/* Top Risk Drivers (company nodes only) */}
+            {(selectedNode.nodeType === 'mainCompany' || selectedNode.nodeType === 'relatedCompany') && (
+              <div className="mb-3">
+                <h4 className="text-xs text-slate-500 font-semibold mb-2 uppercase tracking-wider">
+                  Top Risk Drivers
+                </h4>
+                {driversLoading ? (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-slate-800/30 animate-pulse">
+                        <div className="w-6 h-6 rounded bg-slate-700/50" />
+                        <div className="flex-1 space-y-1">
+                          <div className="h-3 bg-slate-700/50 rounded w-2/3" />
+                          <div className="h-2 bg-slate-700/30 rounded w-full" />
+                        </div>
+                        <div className="h-4 w-10 bg-slate-700/50 rounded" />
+                      </div>
+                    ))}
+                  </div>
+                ) : topDrivers.length > 0 ? (
+                  <div className="space-y-2">
+                    {topDrivers.map((driver, idx) => (
+                      <div key={idx} className="p-2 rounded-lg bg-slate-800/30 border border-white/5">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2">
+                            {driver.isPropagated ? (
+                              <span className="text-xs">&#8644;</span>
+                            ) : (
+                              <span className="text-xs">{driver.categoryIcon || '\u26A0\uFE0F'}</span>
+                            )}
+                            <span className="text-xs text-white font-medium">{driver.categoryName}</span>
+                          </div>
+                          <span className="text-xs text-red-400 font-bold">{driver.contribution}%</span>
+                        </div>
+                        {/* Contribution bar */}
+                        <div className="h-1.5 bg-slate-700/50 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: `${Math.min(100, driver.contribution)}%`,
+                              background: driver.isPropagated
+                                ? 'linear-gradient(90deg, #9B8AE8, #7C3AED)'
+                                : 'linear-gradient(90deg, #ef4444, #f59e0b)',
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between mt-1">
+                          <span className="text-[10px] text-slate-500">
+                            {driver.isPropagated ? `전이율 ${(driver.weight * 100).toFixed(0)}%` : `가중치 ${(driver.weight * 100).toFixed(0)}%`}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            가중점수 {driver.weightedScore.toFixed(1)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-600">드라이버 데이터 없음</p>
+                )}
+              </div>
+            )}
 
             {/* Step 17: Connected edges info - use filteredGraphData */}
             <div className="mb-3">

@@ -12,18 +12,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRiskV2 } from '../context/RiskV2Context';
 import { riskApiV2 } from '../api-v2';
-import type { Text2CypherResultV2 } from '../types-v2';
-
-// ============================================
-// 인사이트 데이터 인터페이스
-// ============================================
-
-interface InsightData {
-  title: string;
-  summary: string;
-  keyFindings: string[];
-  recommendation: string;
-}
+import type { Text2CypherResultV2, BriefingResponse } from '../types-v2';
 
 // 예제 질문 칩 목록
 const EXAMPLE_QUERIES = [
@@ -181,81 +170,48 @@ function CopyButton({ text }: { text: string }) {
 }
 
 // ============================================
-// 인사이트 섹션 컴포넌트
+// 브리핑 복사 텍스트 생성 헬퍼
 // ============================================
-function InsightSection({ insight, isDynamic = false }: { insight: InsightData; isDynamic?: boolean }) {
-  // 복사용 텍스트 생성
-  const copyText = [
-    insight.title,
+function generateBriefingCopyText(briefing: BriefingResponse): string {
+  const lines = [
+    `AI Investment Briefing: ${briefing.company}`,
+    `Risk Score: ${briefing.riskScore} (${briefing.riskLevel})`,
     '',
-    insight.summary,
+    '=== EXECUTIVE SUMMARY ===',
+    briefing.executive_summary,
     '',
-    'Key Findings:',
-    ...insight.keyFindings.map((f, i) => `${i + 1}. ${f}`),
+    '=== CONTEXT ANALYSIS ===',
+    `Industry: ${briefing.context_analysis.industry_context}`,
+    `Timing: ${briefing.context_analysis.timing_significance}`,
     '',
-    'Recommendation:',
-    insight.recommendation,
-  ].join('\n');
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="space-y-4"
-    >
-      {/* 타이틀 + 복사 버튼 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-          <h4 className="text-sm font-semibold text-white">{insight.title}</h4>
-        </div>
-        <CopyButton text={copyText} />
-      </div>
-
-      {/* 요약 */}
-      <div className="bg-slate-800/30 rounded-xl p-3 border border-white/5">
-        <p className="text-xs text-slate-300 leading-relaxed">
-          {insight.summary}
-        </p>
-      </div>
-
-      {/* Key Findings */}
-      <div className="space-y-2">
-        <h5 className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-          Key Findings
-        </h5>
-        <ul className="space-y-2">
-          {insight.keyFindings.map((finding, idx) => (
-            <li key={idx} className="flex items-start gap-2 text-xs text-slate-300">
-              <span className="mt-1 w-1 h-1 rounded-full bg-violet-400 flex-shrink-0" />
-              <span className="leading-relaxed">{finding}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* Recommendation */}
-      <div className="space-y-1.5">
-        <h5 className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-          Recommendation
-        </h5>
-        <div className="bg-violet-500/10 border border-violet-500/20 rounded-lg p-3">
-          <p className="text-xs text-violet-200 leading-relaxed">
-            {insight.recommendation}
-          </p>
-        </div>
-      </div>
-
-      {/* AI 생성 표시 */}
-      <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-        <SparkleIcon className="w-3 h-3 text-purple-500" />
-        <span>AI Generated Insight</span>
-        <span className="text-slate-600">|</span>
-        <span>confidence: {isDynamic ? '92%' : '87%'}</span>
-      </div>
-    </motion.div>
-  );
+    '=== CROSS-SIGNAL ANALYSIS ===',
+    `Patterns: ${briefing.cross_signal_analysis.patterns_detected.join(', ')}`,
+    `Correlations: ${briefing.cross_signal_analysis.correlations}`,
+    `Anomalies: ${briefing.cross_signal_analysis.anomalies}`,
+    '',
+    '=== STAKEHOLDER INSIGHTS ===',
+    `Executives: ${briefing.stakeholder_insights.executive_concerns}`,
+    `Shareholders: ${briefing.stakeholder_insights.shareholder_dynamics}`,
+    '',
+    '=== KEY CONCERNS ===',
+    ...briefing.key_concerns.map((kc, i) =>
+      `${i+1}. ${kc.issue}\n   Why: ${kc.why_it_matters}\n   Watch: ${kc.watch_for}`
+    ),
+    '',
+    '=== RECOMMENDATIONS ===',
+    'Immediate Actions:',
+    ...briefing.recommendations.immediate_actions.map((a, i) => `${i+1}. ${a}`),
+    '',
+    'Monitoring Focus:',
+    ...briefing.recommendations.monitoring_focus.map((m, i) => `${i+1}. ${m}`),
+    '',
+    'Due Diligence Points:',
+    ...briefing.recommendations.due_diligence_points.map((d, i) => `${i+1}. ${d}`),
+    '',
+    `Confidence: ${Math.round(briefing.confidence * 100)}%`,
+    briefing.analysis_limitations ? `Limitations: ${briefing.analysis_limitations}` : '',
+  ];
+  return lines.filter(Boolean).join('\n');
 }
 
 // ============================================
@@ -363,76 +319,39 @@ export default function AICopilotPanel() {
   const [query, setQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [cypherResult, setCypherResult] = useState<Text2CypherResultV2 | null>(null);
-  const [dynamicInsight, setDynamicInsight] = useState<InsightData | null>(null);
-  const [insightLoading, setInsightLoading] = useState(false);
 
-  // Load dynamic insight when view or selection changes
+  // 브리핑 상태
+  const [briefing, setBriefing] = useState<BriefingResponse | null>(null);
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [briefingError, setBriefingError] = useState<string | null>(null);
+
+  // currentDeal 변경 시 briefing 자동 로드
+  // currentDeal.name = "SK하이닉스 검토", targetCompanyName = "SK하이닉스"
+  const dealCompanyName = currentDeal?.targetCompanyName || currentDeal?.id || '';
   useEffect(() => {
-    if (!currentCompany?.name) {
-      setDynamicInsight(null);
+    if (!dealCompanyName) {
+      setBriefing(null);
+      setBriefingError(null);
       return;
     }
 
     let cancelled = false;
-    setInsightLoading(true);
+    setBriefingLoading(true);
+    setBriefingError(null);
 
-    riskApiV2.fetchAIInsight(currentCompany.name).then(res => {
+    riskApiV2.fetchBriefing(dealCompanyName).then(res => {
       if (!cancelled) {
-        if (res.success && res.data && res.data.confidence > 0) {
-          setDynamicInsight({
-            title: `${currentCompany.name} AI 분석`,
-            summary: res.data.summary,
-            keyFindings: res.data.keyFindings,
-            recommendation: res.data.recommendation,
-          });
+        if (res.success && res.data) {
+          setBriefing(res.data);
         } else {
-          setDynamicInsight(null);
+          setBriefingError(res.error || 'Failed to load briefing');
         }
-        setInsightLoading(false);
+        setBriefingLoading(false);
       }
     });
 
     return () => { cancelled = true; };
-  }, [currentCompany?.name, activeView]);
-
-  // 현재 컨텍스트에 기반한 플레이스홀더 인사이트 생성
-  const getContextInsight = (): InsightData | null => {
-    if (!currentCompany) return null;
-
-    if (selectedEntityId) {
-      return {
-        title: '엔티티 상세 분석',
-        summary: `${currentCompany.name}의 선택된 엔티티에 대한 리스크 분석입니다. AI 인사이트를 로드하려면 API 서버 연결이 필요합니다.`,
-        keyFindings: ['엔티티 상세 분석을 위해 API 연결이 필요합니다'],
-        recommendation: 'FastAPI 서버가 실행 중인지 확인하세요.',
-      };
-    }
-
-    if (selectedCategoryCode && currentCategories.length > 0) {
-      const cat = currentCategories.find(c => c.code === selectedCategoryCode);
-      if (cat) {
-        return {
-          title: `${cat.name} 카테고리 분석`,
-          summary: `${currentCompany.name}의 ${cat.name} 카테고리 점수는 ${cat.score}점(가중: ${cat.weightedScore.toFixed(1)})입니다. ${cat.entityCount}개 엔티티, ${cat.eventCount}개 이벤트가 등록되어 있습니다.`,
-          keyFindings: [
-            `카테고리 점수: ${cat.score}점 (가중치 ${(cat.weight * 100).toFixed(0)}%)`,
-            `하위 엔티티 ${cat.entityCount}개, 이벤트 ${cat.eventCount}개`,
-            `추세: ${cat.trend === 'UP' ? '상승' : cat.trend === 'DOWN' ? '하락' : '안정'}`,
-          ],
-          recommendation: cat.score > 50
-            ? '높은 리스크 점수입니다. 즉각적인 모니터링과 대응 방안 수립을 권장합니다.'
-            : cat.score > 20
-            ? '주의 수준의 리스크입니다. 정기적인 모니터링을 유지하세요.'
-            : '안정적인 수준입니다. 변화 추이를 주기적으로 확인하세요.',
-        };
-      }
-    }
-
-    return null;
-  };
-
-  const contextInsight = getContextInsight();
-  const displayInsight = dynamicInsight ?? contextInsight;
+  }, [dealCompanyName]);
 
   // Text2Cypher 쿼리 처리 (Real API)
   const handleSubmitQuery = useCallback(
@@ -501,7 +420,7 @@ export default function AICopilotPanel() {
       <div className="flex justify-between items-center p-4 border-b border-white/5">
         <div className="flex items-center gap-2">
           <SparkleIcon className="w-4 h-4 text-purple-400" />
-          <h3 className="text-sm font-semibold text-white">AI Copilot</h3>
+          <h3 className="text-sm font-semibold text-white">AI Investment Briefing</h3>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -514,37 +433,292 @@ export default function AICopilotPanel() {
         </div>
       </div>
 
-      {/* ======== 인사이트 영역 (스크롤) ======== */}
+      {/* ======== 브리핑 영역 (스크롤) ======== */}
       <div className="flex-1 overflow-auto p-4 space-y-6">
-        {/* 컨텍스트 인식 인사이트 */}
-        <AnimatePresence mode="wait">
+        {/* 로딩 스켈레톤 (5섹션 구조와 동일한 레이아웃) */}
+        {briefingLoading && (
           <motion.div
-            key={`${activeView}-${selectedCategoryCode}-${selectedEntityId}`}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            className="space-y-6"
           >
-            {insightLoading ? (
-              <div className="flex items-center gap-2 text-xs text-slate-400 py-4">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                  className="w-4 h-4 border-2 border-purple-500/30 border-t-purple-500 rounded-full"
-                />
-                <span>AI 인사이트 생성 중...</span>
+            {/* 스피너 + 메시지 */}
+            <div className="flex items-center gap-3 py-2">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                className="w-5 h-5 border-2 border-purple-500/30 border-t-purple-500 rounded-full flex-shrink-0"
+              />
+              <div>
+                <p className="text-xs text-slate-300 font-medium">AI 브리핑 생성 중...</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">Neo4j 데이터를 분석하고 있습니다</p>
               </div>
-            ) : displayInsight ? (
-              <InsightSection insight={displayInsight} isDynamic={!!dynamicInsight} />
-            ) : (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <SparkleIcon className="w-8 h-8 text-slate-600 mb-3" />
-                <p className="text-sm text-slate-400 font-medium">딜을 선택하면 AI 분석이 시작됩니다</p>
-                <p className="text-xs text-slate-500 mt-1">상단에서 딜을 선택하거나, 아래에서 질문을 입력하세요</p>
+            </div>
+            {/* 1. Executive Summary 스켈레톤 */}
+            <div className="rounded-xl overflow-hidden bg-gradient-to-br from-purple-500/20 to-indigo-500/20 border border-purple-500/10">
+              <div className="p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-24 bg-white/10 rounded animate-pulse" />
+                  <div className="h-4 w-16 bg-white/10 rounded-full animate-pulse" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 w-full bg-white/8 rounded animate-pulse" />
+                  <div className="h-3 w-[90%] bg-white/8 rounded animate-pulse" />
+                  <div className="h-3 w-[70%] bg-white/8 rounded animate-pulse" />
+                </div>
+              </div>
+            </div>
+            {/* 2. Key Concerns 스켈레톤 */}
+            <div className="space-y-3">
+              <div className="h-3 w-24 bg-slate-700/50 rounded animate-pulse" />
+              {[1, 2, 3].map(i => (
+                <div key={i} className="bg-slate-800/30 border border-red-500/10 rounded-lg p-3 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-400/30 mt-1.5 flex-shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3 w-[60%] bg-slate-700/40 rounded animate-pulse" />
+                      <div className="h-2.5 w-full bg-slate-700/30 rounded animate-pulse" />
+                      <div className="h-2.5 w-[80%] bg-amber-700/20 rounded animate-pulse" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* 3. Recommendations 스켈레톤 */}
+            <div className="space-y-3">
+              <div className="h-3 w-32 bg-slate-700/50 rounded animate-pulse" />
+              <div className="bg-red-900/5 border border-red-500/10 rounded-lg p-3 space-y-2">
+                <div className="h-2.5 w-28 bg-red-500/20 rounded animate-pulse" />
+                <div className="h-2.5 w-[90%] bg-slate-700/30 rounded animate-pulse" />
+                <div className="h-2.5 w-[75%] bg-slate-700/30 rounded animate-pulse" />
+              </div>
+              <div className="bg-amber-900/5 border border-amber-500/10 rounded-lg p-3 space-y-2">
+                <div className="h-2.5 w-32 bg-amber-500/20 rounded animate-pulse" />
+                <div className="h-2.5 w-[85%] bg-slate-700/30 rounded animate-pulse" />
+                <div className="h-2.5 w-[70%] bg-slate-700/30 rounded animate-pulse" />
+              </div>
+            </div>
+            {/* 4. Data Sources 스켈레톤 */}
+            <div className="space-y-3">
+              <div className="h-3 w-24 bg-slate-700/50 rounded animate-pulse" />
+              <div className="grid grid-cols-2 gap-2">
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} className="bg-slate-800/30 rounded-lg p-3 space-y-2">
+                    <div className="h-2 w-12 bg-slate-700/40 rounded animate-pulse" />
+                    <div className="h-5 w-8 bg-slate-700/30 rounded animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* 에러 상태 */}
+        {briefingError && !briefingLoading && (
+          <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-3 text-xs text-red-200">
+            {briefingError}
+          </div>
+        )}
+
+        {/* 브리핑 렌더링 */}
+        {briefing && !briefingLoading && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="space-y-6"
+          >
+            {/* 1. Executive Summary (보라색 그라디언트) */}
+            <div className="rounded-xl overflow-hidden"
+              style={{ background: 'linear-gradient(135deg, #a855f7 0%, #6366f1 100%)' }}>
+              <div className="p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-bold text-white">{briefing.company}</h4>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                      briefing.riskLevel === 'FAIL' ? 'bg-red-500 text-white' :
+                      briefing.riskLevel === 'WARNING' ? 'bg-amber-500 text-white' :
+                      'bg-green-500 text-white'
+                    }`}>
+                      {briefing.riskScore} / {briefing.riskLevel}
+                    </span>
+                  </div>
+                  <CopyButton text={generateBriefingCopyText(briefing)} />
+                </div>
+                <p className="text-xs text-white/90 leading-relaxed">
+                  {briefing.executive_summary}
+                </p>
+              </div>
+            </div>
+
+            {/* 2. Key Concerns (빨간 포인트) */}
+            {briefing.key_concerns.length > 0 && (
+              <div className="space-y-3">
+                <h5 className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                  Key Concerns
+                </h5>
+                <div className="space-y-2">
+                  {briefing.key_concerns.map((kc, idx) => (
+                    <div key={idx} className="bg-slate-800/30 border border-red-500/20 rounded-lg p-3 space-y-1">
+                      <div className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 flex-shrink-0" />
+                        <div className="space-y-1 flex-1">
+                          <p className="text-xs font-medium text-white">{kc.issue}</p>
+                          <p className="text-[11px] text-slate-300 leading-relaxed">
+                            <span className="text-slate-500">Why:</span> {kc.why_it_matters}
+                          </p>
+                          <p className="text-[11px] text-amber-300 leading-relaxed">
+                            <span className="text-slate-500">Watch:</span> {kc.watch_for}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 3. Recommendations (3단 색상) */}
+            <div className="space-y-3">
+              <h5 className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                Recommendations
+              </h5>
+              <div className="grid gap-3">
+                {/* Immediate Actions (빨강) */}
+                {briefing.recommendations.immediate_actions.length > 0 && (
+                  <div className="bg-red-900/10 border border-red-500/20 rounded-lg p-3 space-y-1.5">
+                    <h6 className="text-[10px] font-semibold text-red-300 uppercase tracking-wider">
+                      Immediate Actions
+                    </h6>
+                    <ul className="space-y-1">
+                      {briefing.recommendations.immediate_actions.map((action, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-[11px] text-slate-300">
+                          <span className="mt-1 w-1 h-1 rounded-full bg-red-400 flex-shrink-0" />
+                          <span className="leading-relaxed">{action}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {/* Monitoring Focus (앰버) */}
+                {briefing.recommendations.monitoring_focus.length > 0 && (
+                  <div className="bg-amber-900/10 border border-amber-500/20 rounded-lg p-3 space-y-1.5"
+                    style={{ borderColor: '#E2A855' }}>
+                    <h6 className="text-[10px] font-semibold uppercase tracking-wider"
+                      style={{ color: '#E2A855' }}>
+                      Monitoring Focus
+                    </h6>
+                    <ul className="space-y-1">
+                      {briefing.recommendations.monitoring_focus.map((mon, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-[11px] text-slate-300">
+                          <span className="mt-1 w-1 h-1 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: '#E2A855' }} />
+                          <span className="leading-relaxed">{mon}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {/* Due Diligence (파랑) */}
+                {briefing.recommendations.due_diligence_points.length > 0 && (
+                  <div className="bg-blue-900/10 border border-blue-500/20 rounded-lg p-3 space-y-1.5">
+                    <h6 className="text-[10px] font-semibold text-blue-300 uppercase tracking-wider">
+                      Due Diligence Points
+                    </h6>
+                    <ul className="space-y-1">
+                      {briefing.recommendations.due_diligence_points.map((dd, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-[11px] text-slate-300">
+                          <span className="mt-1 w-1 h-1 rounded-full bg-blue-400 flex-shrink-0" />
+                          <span className="leading-relaxed">{dd}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 4. Data Sources (2x2 그리드 + confidence) */}
+            {briefing.dataSources && (
+              <div className="space-y-3">
+                <h5 className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                  Data Sources
+                </h5>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-slate-800/30 rounded-lg p-3 space-y-1">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider">News</div>
+                    <div className="text-lg font-bold text-white">{briefing.dataSources.newsCount}</div>
+                  </div>
+                  <div className="bg-slate-800/30 rounded-lg p-3 space-y-1">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider">Disclosures</div>
+                    <div className="text-lg font-bold text-white">{briefing.dataSources.disclosureCount}</div>
+                  </div>
+                  <div className="bg-slate-800/30 rounded-lg p-3 space-y-1">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider">Related Co.</div>
+                    <div className="text-lg font-bold text-white">{briefing.dataSources.relatedCompanyCount}</div>
+                  </div>
+                  <div className="bg-slate-800/30 rounded-lg p-3 space-y-1">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider">Categories</div>
+                    <div className="text-lg font-bold text-white">{briefing.dataSources.categoryCount}</div>
+                  </div>
+                </div>
+                <div className="bg-purple-900/20 border border-purple-500/20 rounded-lg p-3 flex items-center justify-between">
+                  <span className="text-xs text-slate-300">AI Confidence</span>
+                  <span className="text-sm font-bold text-purple-300">{Math.round(briefing.confidence * 100)}%</span>
+                </div>
+              </div>
+            )}
+
+            {/* 5. Top Risk Drivers (dealDetail.categories에서) */}
+            {dealDetail?.categories && (
+              <div className="space-y-3">
+                <h5 className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                  Top Risk Drivers
+                </h5>
+                <div className="space-y-2">
+                  {dealDetail.categories
+                    .filter(cat => cat.weightedScore > 0)
+                    .sort((a, b) => b.weightedScore - a.weightedScore)
+                    .slice(0, 5)
+                    .map(cat => {
+                      const pct = Math.min((cat.weightedScore / 20) * 100, 100);
+                      return (
+                        <div key={cat.code} className="space-y-1">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-slate-300">{cat.name}</span>
+                            <span className="text-slate-500">{cat.weightedScore.toFixed(1)}</span>
+                          </div>
+                          <div className="h-1.5 bg-slate-800/50 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${pct}%`,
+                                background: pct > 75 ? '#ef4444' : pct > 50 ? '#f59e0b' : '#a855f7',
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
               </div>
             )}
           </motion.div>
-        </AnimatePresence>
+        )}
+
+        {/* 딜 미선택 상태 */}
+        {!briefing && !briefingLoading && !briefingError && (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <SparkleIcon className="w-8 h-8 text-slate-600 mb-3" />
+            <p className="text-sm text-slate-400 font-medium">딜을 선택하면 AI 브리핑이 시작됩니다</p>
+            <p className="text-xs text-slate-500 mt-1">상단에서 딜을 선택하거나, 아래에서 질문을 입력하세요</p>
+          </div>
+        )}
+
+        {/* 구분선 */}
+        {briefing && (
+          <div className="border-t border-white/5 pt-6" />
+        )}
 
         {/* 예제 질문 칩 */}
         <div className="space-y-2">

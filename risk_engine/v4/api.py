@@ -19,6 +19,7 @@ from .schemas import (
 )
 from .services import EventService, CategoryService, PersonLinkingService, ScoreService
 from .pipelines import run_full_pipeline
+from risk_engine.ai_service_v2 import AIServiceV2
 
 logger = logging.getLogger(__name__)
 
@@ -796,4 +797,196 @@ async def get_deal_graph(deal_id: str):
         "generatedAt": datetime.now().isoformat(),
         "nodes": nodes,
         "links": links,
+    }
+
+
+# =============================================================================
+# Risk Drivers API
+# =============================================================================
+
+@router.get("/deals/{deal_id}/drivers")
+async def get_risk_drivers(deal_id: str):
+    """리스크 기여도 Top Drivers 반환"""
+    client = get_client()
+
+    # 기업 기본 정보
+    company_query = """
+    MATCH (c:Company {name: $dealId})
+    RETURN c.name AS name, c.totalRiskScore AS totalScore,
+           c.directScore AS directScore, c.propagatedScore AS propagatedScore,
+           c.riskLevel AS riskLevel
+    """
+    company = client.execute_read_single(company_query, {"dealId": deal_id})
+    if not company:
+        raise HTTPException(status_code=404, detail=f"Company not found: {deal_id}")
+
+    # 카테고리별 점수
+    category_service = CategoryService(client)
+    categories = category_service.get_categories_by_company(deal_id)
+
+    total_score = company.get("totalScore", 0) or 0
+    direct_score = company.get("directScore", 0) or 0
+
+    # 기여도 계산: weightedScore / directScore * 100
+    drivers = []
+    for cat in sorted(categories, key=lambda c: c.get("weightedScore", 0) or 0, reverse=True):
+        weighted = cat.get("weightedScore", 0) or 0
+        contribution = round(weighted / direct_score * 100, 1) if direct_score > 0 else 0
+        drivers.append({
+            "categoryCode": cat["code"],
+            "categoryName": cat["name"],
+            "categoryIcon": cat.get("icon", ""),
+            "score": cat.get("score", 0) or 0,
+            "weight": cat.get("weight", 0) or 0,
+            "weightedScore": weighted,
+            "contribution": contribution,
+            "eventCount": cat.get("eventCount", 0) or 0,
+            "isPropagated": False,
+        })
+
+    # 관련기업 전이 점수
+    related_query = """
+    MATCH (c:Company {name: $dealId})-[r:HAS_RELATED]->(rc:Company)
+    RETURN rc.name AS name, rc.totalRiskScore AS score,
+           coalesce(r.tier, 1) AS tier, coalesce(r.relation, '관련사') AS relation
+    """
+    related = client.execute_read(related_query, {"dealId": deal_id}) or []
+    for rel in related:
+        rel_score = rel.get("score", 0) or 0
+        tier = rel.get("tier", 1) or 1
+        rate = 0.3 if tier == 1 else 0.1
+        transfer = round(rel_score * rate)
+        if transfer > 0:
+            contribution = round(transfer / total_score * 100, 1) if total_score > 0 else 0
+            drivers.append({
+                "categoryCode": "PROPAGATED",
+                "categoryName": f"{rel['name']} 전이",
+                "categoryIcon": "",
+                "score": rel_score,
+                "weight": rate,
+                "weightedScore": transfer,
+                "contribution": contribution,
+                "eventCount": 0,
+                "isPropagated": True,
+            })
+
+    # 기여도 기준 정렬
+    drivers.sort(key=lambda d: d["weightedScore"], reverse=True)
+
+    return {
+        "companyName": company["name"],
+        "totalScore": total_score,
+        "directScore": direct_score,
+        "propagatedScore": company.get("propagatedScore", 0) or 0,
+        "riskLevel": company.get("riskLevel", "PASS") or "PASS",
+        "topDrivers": drivers[:3],
+        "allDrivers": drivers,
+    }
+
+
+@router.get("/deals/{deal_id}/briefing")
+async def get_deal_briefing(deal_id: str):
+    """딜 대상 AI 브리핑 생성"""
+    client = get_client()
+
+    # 1. 기본 기업 정보
+    company_query = """
+    MATCH (c:Company {name: $dealId})
+    RETURN c.name AS name, c.sector AS sector,
+           c.totalRiskScore AS totalScore, c.riskLevel AS riskLevel
+    """
+    company = client.execute_read(company_query, {"dealId": deal_id})
+    if not company:
+        raise HTTPException(status_code=404, detail=f"Deal {deal_id} not found")
+    company = company[0]
+
+    # 2. 카테고리 점수
+    category_service = CategoryService(client)
+    categories = category_service.get_categories_by_company(deal_id)
+    category_scores = {cat["code"]: {"score": cat.get("score",0), "weight": cat.get("weight",0), "weightedScore": cat.get("weightedScore",0)} for cat in categories}
+
+    # 3. 증거
+    score_service = ScoreService(client)
+    evidence = score_service.get_score_evidence(deal_id)
+
+    # 4. 최근 신호 (뉴스/공시)
+    signals_query = """
+    MATCH (c:Company {name: $dealId})-[:HAS_CATEGORY]->(rc:RiskCategory)
+          -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+    WHERE ev.type IN ['NEWS', 'DISCLOSURE']
+    RETURN ev.type AS type, rc.code AS category, ev.title AS title,
+           coalesce(ev.score, 0) AS score, coalesce(ev.date, '') AS date
+    ORDER BY ev.date DESC LIMIT 20
+    """
+    signals_raw = client.execute_read(signals_query, {"dealId": deal_id}) or []
+    signals = [{"type": s["type"].lower(), "category": s["category"], "title": s["title"], "score": s["score"], "date": s["date"]} for s in signals_raw]
+
+    # 5. 임원/주주
+    persons_query = """
+    MATCH (c:Company {name: $dealId})-[:HAS_CATEGORY]->(rc:RiskCategory)
+          -[:HAS_ENTITY]->(re:RiskEntity)
+    WHERE re.type IN ['PERSON', 'SHAREHOLDER']
+    RETURN DISTINCT re.name AS name, re.position AS position, re.type AS type
+    LIMIT 10
+    """
+    persons_raw = client.execute_read(persons_query, {"dealId": deal_id}) or []
+    executives = [{"name": p["name"], "position": p["position"]} for p in persons_raw if p.get("position")]
+    shareholders = [{"name": p["name"], "shareRatio": 0.0} for p in persons_raw if p["type"] == "SHAREHOLDER"]
+
+    # 6. 관련 기업
+    related_query = """
+    MATCH (c:Company {name: $dealId})-[r:HAS_RELATED]->(rc:Company)
+    RETURN rc.name AS name, coalesce(r.relation, 'RELATED') AS relation
+    LIMIT 10
+    """
+    related_raw = client.execute_read(related_query, {"dealId": deal_id}) or []
+    related_companies = [{"name": r["name"], "relation": r["relation"]} for r in related_raw]
+
+    # 7. deal_context 조립 + AI 호출
+    deal_context = {
+        "company": company["name"],
+        "sector": company.get("sector", ""),
+        "riskScore": company.get("totalScore", 0) or 0,
+        "riskLevel": company.get("riskLevel", "PASS") or "PASS",
+        "signals": signals,
+        "executives": executives,
+        "shareholders": shareholders,
+        "relatedCompanies": related_companies,
+        "categoryScores": category_scores,
+    }
+
+    ai_service = AIServiceV2()
+    try:
+        insight = ai_service.generate_comprehensive_insight(deal_context)
+    except Exception as e:
+        logger.warning(f"AI briefing 생성 실패: {e}")
+        insight = {
+            "executive_summary": f"{company['name']}에 대한 분석 데이터가 부족합니다.",
+            "context_analysis": {"industry_context": "", "timing_significance": ""},
+            "cross_signal_analysis": {"patterns_detected": [], "correlations": "", "anomalies": ""},
+            "stakeholder_insights": {"executive_concerns": "", "shareholder_dynamics": ""},
+            "key_concerns": [],
+            "recommendations": {"immediate_actions": [], "monitoring_focus": [], "due_diligence_points": []},
+            "confidence": 0.3,
+            "analysis_limitations": "AI 서비스 호출 실패",
+        }
+
+    return {
+        "company": company["name"],
+        "riskScore": company.get("totalScore", 0) or 0,
+        "riskLevel": company.get("riskLevel", "PASS") or "PASS",
+        "executive_summary": insight.get("executive_summary", ""),
+        "context_analysis": insight.get("context_analysis", {}),
+        "cross_signal_analysis": insight.get("cross_signal_analysis", {}),
+        "stakeholder_insights": insight.get("stakeholder_insights", {}),
+        "key_concerns": insight.get("key_concerns", []),
+        "recommendations": insight.get("recommendations", {}),
+        "confidence": insight.get("confidence", 0),
+        "analysis_limitations": insight.get("analysis_limitations", ""),
+        "dataSources": {
+            "newsCount": evidence.get("totalNews", 0),
+            "disclosureCount": evidence.get("totalDisclosures", 0),
+            "relatedCompanyCount": len(related_companies),
+            "categoryCount": len(categories),
+        },
     }
