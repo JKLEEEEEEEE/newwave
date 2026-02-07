@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import type {
   CategoryCodeV2,
+  EntityType,
   RiskEntityV2,
   RiskEventV2,
 } from '../types-v2';
@@ -32,6 +33,11 @@ import ScoreGauge from '../shared/ScoreGauge';
 import RiskBadge from '../shared/RiskBadge';
 import TrendIndicator from '../shared/TrendIndicator';
 import ErrorState from '../shared/ErrorState';
+import RiskRadarChart from '../widgets/RiskRadarChart';
+import SignalHeatmap from '../widgets/SignalHeatmap';
+import RiskAnatomy from '../widgets/RiskAnatomy';
+import EvidenceBoard from '../widgets/EvidenceBoard';
+import AIRiskNarrative from '../widgets/AIRiskNarrative';
 
 // ============================================
 // 애니메이션 변수
@@ -370,6 +376,28 @@ function CompanyDetailLevel({
         })}
       </motion.div>
 
+      {/* Risk Radar + Signal Heatmap */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <RiskRadarChart
+          categories={categories}
+          onCategoryClick={(code) => selectCategory(code as CategoryCodeV2)}
+        />
+        <SignalHeatmap
+          events={state.recentEvents}
+          categories={categories}
+        />
+      </div>
+
+      {/* AI Risk Narrative */}
+      <div className="mb-8">
+        <AIRiskNarrative
+          dealId={dealId}
+          companyName={company.name}
+          riskScore={company.totalRiskScore}
+          riskLevel={company.riskLevel}
+        />
+      </div>
+
       {/* 하단: 관련기업 패널 */}
       {relatedCompanies.length > 0 && (
         <div>
@@ -544,6 +572,17 @@ function CategoryDetailLevel({
           </div>
         </div>
       </div>
+
+      {/* Risk Anatomy (BowTie Diagram) */}
+      {category && entities.length > 0 && (
+        <div className="mb-8">
+          <RiskAnatomy
+            category={category}
+            entities={entities}
+            onEntityClick={(eid) => selectEntity(eid)}
+          />
+        </div>
+      )}
 
       {/* 엔티티 리스트 */}
       {entities.length === 0 ? (
@@ -773,6 +812,28 @@ function EntityDetailLevel({
           <p className="text-slate-400 mt-3">{entity.description}</p>
         </div>
       </div>
+
+      {/* Evidence Board */}
+      {events.length > 0 && (
+        <div className="mb-8">
+          <EvidenceBoard
+            entities={[{
+              id: entityId,
+              companyId: state.dealDetail?.mainCompany.id ?? '',
+              categoryCode: (state.selectedCategoryCode ?? 'OTHER') as CategoryCodeV2,
+              name: entity.name,
+              type: entity.type as EntityType,
+              subType: '',
+              position: entity.position,
+              description: entity.description,
+              riskScore: entity.riskScore,
+              eventCount: events.length,
+            }]}
+            events={events}
+            companyName={state.dealDetail?.mainCompany.name}
+          />
+        </div>
+      )}
 
       {/* 이벤트 타임라인 */}
       <h3 className="text-lg font-semibold text-white mb-6">
