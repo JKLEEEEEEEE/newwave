@@ -438,12 +438,7 @@ export default function CommandCenter() {
           <span className="text-purple-400">&#9670;</span>
           Investment Deals
         </h2>
-        <motion.div
-          className="flex flex-col gap-3"
-          variants={containerVariants}
-          initial="hidden"
-          animate="visible"
-        >
+        <div className="flex flex-col gap-3">
           {/* U15: 로딩 스켈레톤 (초기 로딩에서만 — 이미 데이터가 있으면 유지) */}
           {dealsLoading && deals.length === 0 ? (
             <>
@@ -468,7 +463,7 @@ export default function CommandCenter() {
             const statusColor = deal.status === 'ACTIVE' ? '#22c55e' : deal.status === 'PENDING' ? '#f59e0b' : '#6b7280';
 
             return (
-              <motion.div key={deal.id} variants={itemVariants}>
+              <motion.div key={deal.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 * deals.indexOf(deal) }}>
                 <GlassCard
                   hover
                   onClick={() => selectDeal(deal.id)}
@@ -554,7 +549,7 @@ export default function CommandCenter() {
               </motion.div>
             );
           })}
-        </motion.div>
+        </div>
       </motion.div>
 
       {/* ============================================ */}
