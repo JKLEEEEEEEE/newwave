@@ -90,8 +90,6 @@ export interface VerificationData {
     sponsor: string;
     borrower: string;
     target: string;
-    projectName?: string; // New field
-    projectInfo?: string; // New field
     dealSize: string;
     equity: string;
     debt: string;
@@ -134,12 +132,4 @@ export interface APIScoringResult {
     module_id: number;
     module_name: string;
   }[];
-  deal_terms?: {
-    PROJECT_NAME: { extracted_value: string; evidence_text: string; notes?: string };
-    PROJECT_INFO: { extracted_value: string; evidence_text: string; notes?: string };
-    BORROWER: { extracted_value: string; evidence_text: string; notes?: string };
-    SPONSOR: { extracted_value: string; evidence_text: string; notes?: string };
-    DEALSIZE: { extracted_value: string; evidence_text: string; notes?: string };
-    TARGET_EQUITY: { extracted_value: string; evidence_text: string; notes?: string };
-  };
 }

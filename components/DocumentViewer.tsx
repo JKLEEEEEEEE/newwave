@@ -10,26 +10,12 @@ interface Props {
     deal_structure_financing_plan: string[];
     risk_factors_mitigation: string[];
   };
-  customContent?: {
-    title: string;
-    subtitle: string;
-    sector: string;
-    context: string;
-    highlight: string;
-    dealSize: string;
-    equity: string;
-    debt: string;
-    leverage: string;
-    risk: string;
-  };
 }
 
-const DocumentViewer: React.FC<Props> = ({ dealId, activePage, onUploadClick, aiSummary, customContent }) => {
+const DocumentViewer: React.FC<Props> = ({ dealId, activePage, onUploadClick, aiSummary }) => {
   const [activeTab, setActiveTab] = useState<'pdf' | 'excel'>('pdf');
 
   const content = useMemo(() => {
-    if (customContent) return customContent;
-
     const cases: Record<string, any> = {
       case1: {
         title: 'Project Golden',
@@ -70,7 +56,7 @@ const DocumentViewer: React.FC<Props> = ({ dealId, activePage, onUploadClick, ai
     };
 
     return cases[dealId] || cases.case5;
-  }, [dealId, customContent]);
+  }, [dealId]);
 
   return (
     <div className="flex flex-col h-full bg-slate-100 font-sans">
