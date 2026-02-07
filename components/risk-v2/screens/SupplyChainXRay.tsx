@@ -198,6 +198,12 @@ export default function SupplyChainXRay() {
   const [showAllConnections, setShowAllConnections] = useState(false);
   const detailPanelRef = useRef<HTMLDivElement>(null);
 
+  // --- Legend 패널 ---
+  const [selectedLegendType, setSelectedLegendType] = useState<string | null>(null);
+  const [legendSearch, setLegendSearch] = useState('');
+  const [legendSortDesc, setLegendSortDesc] = useState(true);
+  const legendPanelRef = useRef<HTMLDivElement>(null);
+
   // --- 관련기업 하이라이트 ---
   const [highlightedCompanyId, setHighlightedCompanyId] = useState<string | null>(null);
 
@@ -251,6 +257,15 @@ export default function SupplyChainXRay() {
     };
   }, []);
 
+
+  // Legend 패널 열릴 때 자동 스크롤
+  useEffect(() => {
+    if (selectedLegendType && legendPanelRef.current) {
+      setTimeout(() => {
+        legendPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 50);
+    }
+  }, [selectedLegendType]);
 
   // ============================================
   // Step 8: 캐스케이드 노드 시각 효과 (useEffect로 scene traverse)
@@ -768,45 +783,131 @@ export default function SupplyChainXRay() {
             </div>
           )}
 
-          {/* 노드 유형별 범례 */}
+          {/* 노드 유형별 범례 (클릭 가능) */}
           <div>
             <h3 className="text-xs text-slate-500 font-semibold mb-2 uppercase tracking-wider">
               Node Legend
             </h3>
             <div className="flex flex-col gap-1.5">
-              {NODE_LEGEND.map((item) => (
-                <div key={item.type} className="flex items-center gap-2">
-                  {/* 모양 표현 */}
-                  {item.shape === 'circle-md' && (
-                    <span
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: item.color }}
-                    />
-                  )}
-                  {item.shape === 'circle-sm' && (
-                    <span
-                      className="w-2.5 h-2.5 rounded-full"
-                      style={{ backgroundColor: item.color }}
-                    />
-                  )}
-                  {item.shape === 'diamond' && (
-                    <span
-                      className="w-2.5 h-2.5 rotate-45"
-                      style={{ backgroundColor: item.color }}
-                    />
-                  )}
-                  {item.shape === 'dot' && (
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: item.color }}
-                    />
-                  )}
-                  <span className="text-[10px] text-slate-400 flex-1">{item.label}</span>
-                  <span className="text-[10px] text-slate-600">{item.tier}</span>
-                </div>
-              ))}
+              {NODE_LEGEND.map((item) => {
+                const count = filteredGraphData.nodes.filter(n => n.nodeType === item.type).length;
+                const isSelected = selectedLegendType === item.type;
+                return (
+                  <div
+                    key={item.type}
+                    className={`flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-white/10 border border-white/20'
+                        : 'hover:bg-white/5 border border-transparent'
+                    }`}
+                    onClick={() => {
+                      setSelectedLegendType(prev => prev === item.type ? null : item.type);
+                      setLegendSearch('');
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { setSelectedLegendType(prev => prev === item.type ? null : item.type); setLegendSearch(''); } }}
+                  >
+                    {item.shape === 'circle-md' && <span className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />}
+                    {item.shape === 'circle-sm' && <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />}
+                    {item.shape === 'diamond' && <span className="w-2.5 h-2.5 rotate-45" style={{ backgroundColor: item.color }} />}
+                    {item.shape === 'dot' && <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />}
+                    <span className="text-[10px] text-slate-400 flex-1">{item.label}</span>
+                    <span className="text-[10px] text-slate-500 bg-slate-800/60 px-1.5 rounded">{count}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
+
+          {/* Legend 노드 목록 패널 */}
+          {selectedLegendType && (() => {
+            const legendItem = NODE_LEGEND.find(l => l.type === selectedLegendType);
+            const allOfType = filteredGraphData.nodes.filter(n => n.nodeType === selectedLegendType);
+            const searched = legendSearch
+              ? allOfType.filter(n => n.name.toLowerCase().includes(legendSearch.toLowerCase()))
+              : allOfType;
+            const sorted = [...searched].sort((a, b) =>
+              legendSortDesc ? b.riskScore - a.riskScore : a.riskScore - b.riskScore
+            );
+            return (
+              <div ref={legendPanelRef} className="mt-3 p-3 rounded-xl bg-slate-800/50 border border-white/10">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: legendItem?.color }} />
+                    <span className="text-xs text-white font-semibold">{legendItem?.label}</span>
+                    <span className="text-[10px] text-slate-500">{sorted.length}개</span>
+                  </div>
+                  <button
+                    onClick={() => setSelectedLegendType(null)}
+                    className="p-0.5 rounded hover:bg-white/10 transition-colors"
+                    aria-label="닫기"
+                  >
+                    <span className="text-slate-500 text-xs">{'\u2715'}</span>
+                  </button>
+                </div>
+
+                {/* 검색 + 정렬 */}
+                <div className="flex gap-1.5 mb-2">
+                  <input
+                    type="text"
+                    value={legendSearch}
+                    onChange={(e) => setLegendSearch(e.target.value)}
+                    placeholder="검색..."
+                    className="flex-1 bg-slate-900/60 border border-white/10 rounded px-2 py-1 text-[10px] text-white placeholder-slate-600 focus:outline-none focus:border-purple-500/40"
+                  />
+                  <button
+                    onClick={() => setLegendSortDesc(prev => !prev)}
+                    className="px-2 py-1 rounded text-[10px] text-slate-400 bg-slate-900/60 border border-white/10 hover:border-white/20 transition-colors"
+                    title="점수 정렬"
+                  >
+                    {legendSortDesc ? '\u2193 점수' : '\u2191 점수'}
+                  </button>
+                </div>
+
+                {/* 노드 리스트 */}
+                <div className="flex flex-col gap-1 max-h-[280px] overflow-y-auto">
+                  {sorted.map(node => (
+                    <div
+                      key={node.id}
+                      className={`flex items-center justify-between p-1.5 rounded-lg cursor-pointer transition-colors ${
+                        selectedNode?.id === node.id
+                          ? 'bg-purple-500/20 border border-purple-500/30'
+                          : 'hover:bg-white/5 border border-transparent'
+                      }`}
+                      onClick={() => {
+                        setSelectedNode(node);
+                        setShowAllConnections(false);
+                        // 카메라 포커스
+                        if (fgRef.current) {
+                          const fg = fgRef.current;
+                          const graphNode = filteredGraphData.nodes.find(n => n.id === node.id) as any;
+                          if (graphNode?.x !== undefined) {
+                            fg.cameraPosition(
+                              { x: graphNode.x + 80, y: graphNode.y + 40, z: graphNode.z + 80 },
+                              { x: graphNode.x, y: graphNode.y, z: graphNode.z },
+                              1000
+                            );
+                          }
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <span className="text-[10px] text-slate-300 truncate flex-1">{node.name}</span>
+                      <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                        <span className="text-[10px] text-slate-400">{node.riskScore}점</span>
+                        <RiskBadge level={node.riskLevel} size="sm" showLabel={false} />
+                      </div>
+                    </div>
+                  ))}
+                  {sorted.length === 0 && (
+                    <p className="text-[10px] text-slate-600 text-center py-2">검색 결과 없음</p>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </GlassCard>
       </motion.div>
 
@@ -1055,7 +1156,7 @@ export default function SupplyChainXRay() {
       {/* ============================================ */}
       <motion.div
         className="absolute right-4 bottom-4 z-10"
-        style={{ width: '260px' }}
+        style={{ width: '300px' }}
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5, duration: 0.5 }}
