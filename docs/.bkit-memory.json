@@ -1,0 +1,11 @@
+{
+  "sessionCount": 56,
+  "lastSession": {
+    "startedAt": "2026-02-07T11:08:22.575Z",
+    "platform": "claude",
+    "level": "Dynamic"
+  },
+  "currentFeature": "risk-data-enrichment",
+  "currentPhase": "plan",
+  "matchRate": null
+}

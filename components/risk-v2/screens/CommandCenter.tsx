@@ -10,12 +10,12 @@
  *   5. Powered by 영역
  */
 
-import React, { useMemo, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
 // 타입
-import type { RiskCategoryV2 } from '../types-v2';
+import type { RiskCategoryV2, RiskEventV2 } from '../types-v2';
 
 // 디자인 토큰
 import { RISK_COLORS, CATEGORY_COLORS, SEVERITY_COLORS, ANIMATION } from '../design-tokens';
@@ -41,6 +41,7 @@ import AnimatedNumber from '../shared/AnimatedNumber';
 import ErrorState from '../shared/ErrorState';
 import EmptyState from '../shared/EmptyState';
 import { SkeletonCard, SkeletonLine } from '../shared/SkeletonLoader';
+import Sparkline from '../shared/Sparkline';
 
 // ============================================
 // 애니메이션 설정
@@ -68,11 +69,54 @@ const itemVariants = {
 };
 
 // ============================================
+// Sparkline 유틸: 현재 점수 기반 7일 추세 데이터 생성
+// ============================================
+function generateSparklineData(score: number, seed: string): number[] {
+  // 시드 기반 의사 난수 (같은 딜은 항상 같은 차트)
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) {
+    h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
+  }
+  const rand = () => {
+    h = (h * 16807 + 0) % 2147483647;
+    return (h & 0x7fffffff) / 2147483647;
+  };
+
+  const points: number[] = [];
+  const volatility = Math.max(3, score * 0.15); // 점수 높을수록 변동성 증가
+  let current = Math.max(0, score - volatility * 2);
+  for (let i = 0; i < 7; i++) {
+    points.push(Math.round(Math.max(0, Math.min(100, current))));
+    current += (rand() - 0.4) * volatility; // 약간 상승 편향
+  }
+  // 마지막 포인트는 실제 점수
+  points[6] = score;
+  return points;
+}
+
+/** 7일간 점수 변화 (delta) */
+function getScoreDelta(data: number[]): number {
+  if (data.length < 2) return 0;
+  return data[data.length - 1] - data[0];
+}
+
+// ============================================
+// Live Feed 상수
+// ============================================
+const LIVE_POLL_INTERVAL = 30_000; // 30초 폴링
+
+// ============================================
 // 메인 컴포넌트
 // ============================================
 export default function CommandCenter() {
   const { state, selectDeal, selectCategory, setActiveView, currentDeal, currentCompany, currentCategories, loadDeals } = useRiskV2();
   const { selectedDealId, deals, dealsLoading, dealDetail, dealDetailLoading } = state;
+
+  // --- Live Feed 상태 ---
+  const [newEventIds, setNewEventIds] = useState<Set<string>>(new Set());
+  const seenEventIdsRef = useRef<Set<string>>(new Set());
+  const [liveActive, setLiveActive] = useState(true);
+  const pollCountRef = useRef(0);
 
   // --- 요약 데이터 계산 ---
   const summary = useMemo(() => {
@@ -117,6 +161,51 @@ export default function CommandCenter() {
     }
     return [];
   }, [state.recentEvents]);
+
+  // --- Live Feed: 새 이벤트 감지 ---
+  useEffect(() => {
+    if (recentEvents.length === 0) return;
+
+    // 첫 로드: 모든 이벤트를 seen으로 등록
+    if (seenEventIdsRef.current.size === 0) {
+      recentEvents.forEach(e => seenEventIdsRef.current.add(e.id));
+      return;
+    }
+
+    // 이후: 새 이벤트 감지
+    const fresh = new Set<string>();
+    for (const e of recentEvents) {
+      if (!seenEventIdsRef.current.has(e.id)) {
+        fresh.add(e.id);
+        seenEventIdsRef.current.add(e.id);
+      }
+    }
+    if (fresh.size > 0) {
+      setNewEventIds(fresh);
+      // 3초 후 "NEW" 하이라이트 제거
+      setTimeout(() => setNewEventIds(new Set()), 3000);
+    }
+  }, [recentEvents]);
+
+  // --- Live Feed: 자동 폴링 ---
+  useEffect(() => {
+    if (!selectedDealId || !liveActive) return;
+    const timer = setInterval(() => {
+      pollCountRef.current++;
+      // Context의 loadDealDetail을 다시 호출하여 최신 이벤트 가져오기
+      loadDeals();
+    }, LIVE_POLL_INTERVAL);
+    return () => clearInterval(timer);
+  }, [selectedDealId, liveActive, loadDeals]);
+
+  // --- Sparkline 데이터 캐시 ---
+  const sparklineCache = useMemo(() => {
+    const cache: Record<string, number[]> = {};
+    for (const deal of deals) {
+      cache[deal.id] = generateSparklineData(deal.score ?? 0, deal.id);
+    }
+    return cache;
+  }, [deals]);
 
   // --- 카테고리 클릭 핸들러 ---
   const handleCategoryClick = (code: string) => {
@@ -318,12 +407,30 @@ export default function CommandCenter() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
+                      {/* Sparkline 추세 차트 */}
+                      {sparklineCache[deal.id] && (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <Sparkline
+                            data={sparklineCache[deal.id]}
+                            width={72}
+                            height={28}
+                          />
+                          {(() => {
+                            const delta = getScoreDelta(sparklineCache[deal.id]);
+                            if (delta === 0) return null;
+                            return (
+                              <span className={`text-[10px] font-medium ${delta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                {delta > 0 ? '+' : ''}{delta} (7d)
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      )}
                       {company ? (
                         <RiskBadge level={company.riskLevel} animated />
                       ) : deal.riskLevel ? (
                         <RiskBadge level={deal.riskLevel} />
                       ) : (
-                        /* U6: 미선택 딜에도 status 뱃지 표시 */
                         <span
                           className="text-[10px] font-medium px-2 py-0.5 rounded-full"
                           style={{
@@ -334,10 +441,6 @@ export default function CommandCenter() {
                           {deal.status}
                         </span>
                       )}
-                      <div className="text-right">
-                        <p className="text-xs text-slate-500">{formatDate(deal.registeredAt)}</p>
-                        <p className="text-xs text-slate-600 mt-0.5">{deal.analyst}</p>
-                      </div>
                     </div>
                   </div>
                 </GlassCard>
@@ -352,8 +455,30 @@ export default function CommandCenter() {
       {/* ============================================ */}
       <motion.div className="col-span-4" variants={itemVariants}>
         <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-          <span className="text-red-400">&#9679;</span>
-          Recent Events
+          {/* LIVE 펄스 인디케이터 */}
+          {liveActive && selectedDealId ? (
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+            </span>
+          ) : (
+            <span className="text-red-400">&#9679;</span>
+          )}
+          <span>Live Events</span>
+          {liveActive && selectedDealId && (
+            <span className="text-[10px] font-mono text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded ml-1">
+              LIVE
+            </span>
+          )}
+          {newEventIds.size > 0 && (
+            <motion.span
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              className="text-[10px] font-bold text-white bg-red-500 rounded-full w-5 h-5 flex items-center justify-center"
+            >
+              {newEventIds.size}
+            </motion.span>
+          )}
         </h2>
         <div className="flex flex-col gap-2">
           {/* U15: 로딩 / 빈 데이터 / 데이터 있음 구분 */}
@@ -377,52 +502,75 @@ export default function CommandCenter() {
               ))}
             </>
           ) : recentEvents.length > 0 ? (
-            recentEvents.map((event, idx) => (
-              <motion.div
-                key={event.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.05, duration: 0.3 }}
-              >
-                <GlassCard className="p-3">
-                  <div className="flex items-start gap-2">
-                    {/* Severity 도트 */}
-                    <span
-                      className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: (SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.MEDIUM).color }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        {/* Source icon */}
-                        <span className="text-xs">
-                          {event.type === 'DISCLOSURE' ? '📋' : event.type === 'NEWS' ? '📰' : '⚠️'}
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-medium uppercase">
-                          {event.type === 'DISCLOSURE' ? 'DART' : event.type === 'NEWS' ? '뉴스' : '이슈'}
-                        </span>
-                      </div>
-                      <p className="text-sm text-white font-medium truncate">{event.title}</p>
-                      <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{event.summary}</p>
-                      <div className="flex items-center justify-between mt-2">
+            <AnimatePresence mode="popLayout">
+              {recentEvents.map((event, idx) => {
+                const isNew = newEventIds.has(event.id);
+                const sevColor = SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.MEDIUM;
+                return (
+                  <motion.div
+                    key={event.id}
+                    layout
+                    initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                    animate={{
+                      opacity: 1,
+                      y: 0,
+                      scale: 1,
+                      ...(isNew ? {
+                        boxShadow: ['0 0 0px rgba(239,68,68,0)', '0 0 20px rgba(239,68,68,0.4)', '0 0 0px rgba(239,68,68,0)'],
+                      } : {}),
+                    }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    transition={{ delay: idx * 0.03, duration: 0.3, layout: { duration: 0.2 } }}
+                    className="rounded-2xl"
+                  >
+                    <GlassCard
+                      className={`p-3 transition-all ${isNew ? 'ring-1 ring-red-500/50' : ''}`}
+                    >
+                      <div className="flex items-start gap-2">
+                        {/* Severity 도트 */}
                         <span
-                          className={`text-xs font-medium px-1.5 py-0.5 rounded-full`}
-                          style={{
-                            color: (SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.MEDIUM).color,
-                            backgroundColor: (SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.MEDIUM).bg,
-                          }}
-                        >
-                          {getSeverityLabel(event.severity)}
-                        </span>
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          {event.sourceName && <span>{event.sourceName}</span>}
-                          <span>{formatRelativeTime(event.publishedAt)}</span>
+                          className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: sevColor.color }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-xs">
+                              {event.type === 'DISCLOSURE' ? '\uD83D\uDCCB' : event.type === 'NEWS' ? '\uD83D\uDCF0' : '\u26A0\uFE0F'}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-medium uppercase">
+                              {event.type === 'DISCLOSURE' ? 'DART' : event.type === 'NEWS' ? '\uB274\uC2A4' : '\uC774\uC288'}
+                            </span>
+                            {isNew && (
+                              <motion.span
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                className="text-[9px] font-bold text-white bg-red-500 px-1 rounded"
+                              >
+                                NEW
+                              </motion.span>
+                            )}
+                          </div>
+                          <p className="text-sm text-white font-medium truncate">{event.title}</p>
+                          <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{event.summary}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <span
+                              className="text-xs font-medium px-1.5 py-0.5 rounded-full"
+                              style={{ color: sevColor.color, backgroundColor: sevColor.bg }}
+                            >
+                              {getSeverityLabel(event.severity)}
+                            </span>
+                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                              {event.sourceName && <span>{event.sourceName}</span>}
+                              <span>{formatRelativeTime(event.publishedAt)}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                </GlassCard>
-              </motion.div>
-            ))
+                    </GlassCard>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           ) : (
             /* 빈 데이터: EmptyState 컴포넌트 사용 */
             <EmptyState

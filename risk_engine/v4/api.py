@@ -621,7 +621,53 @@ async def get_deal_graph(deal_id: str):
             "riskTransfer": weighted,
         })
 
-    # 4. 관련기업 노드
+    # 4. 메인기업 RiskEntity 노드
+    entity_query = """
+    MATCH (c:Company {name: $dealId})-[:HAS_CATEGORY]->(rc:RiskCategory)-[:HAS_ENTITY]->(re:RiskEntity)
+    WHERE rc.score > 0
+    RETURN re.name AS name, re.type AS type, re.score AS score,
+           rc.code AS catCode, rc.name AS catName,
+           re.position AS position, re.description AS description
+    """
+    entities = client.execute_read(entity_query, {"dealId": deal_id}) or []
+    entity_ids_seen = set()
+    for ent in entities:
+        ent_name = ent.get("name", "Unknown")
+        ent_cat = ent.get("catCode", "OTHER")
+        ent_id = f"RE_{deal_id}_{ent_cat}_{ent_name}"
+        if ent_id in entity_ids_seen:
+            continue
+        entity_ids_seen.add(ent_id)
+        ent_score = ent.get("score", 0) or 0
+        ent_level = "FAIL" if ent_score >= 30 else ("WARNING" if ent_score >= 10 else "PASS")
+
+        nodes.append({
+            "id": ent_id,
+            "name": ent_name,
+            "nodeType": "riskEntity",
+            "riskScore": ent_score,
+            "riskLevel": ent_level,
+            "tier": 3,
+            "selectionReason": f"{ent.get('catName', ent_cat)} 카테고리 내 {ent.get('type', 'ENTITY')}",
+            "metadata": {
+                "type": ent.get("type", ""),
+                "position": ent.get("position", ""),
+                "categoryCode": ent_cat,
+                "description": ent.get("description", ""),
+            },
+        })
+
+        cat_id = f"RC_{deal_id}_{ent_cat}"
+        links.append({
+            "source": cat_id,
+            "target": ent_id,
+            "relationship": "HAS_ENTITY",
+            "dependency": 0.5,
+            "label": ent.get("type", "ENTITY"),
+            "riskTransfer": ent_score,
+        })
+
+    # 5. 관련기업 노드
     related_query = """
     MATCH (c:Company {name: $dealId})-[r:HAS_RELATED]->(rc:Company)
     RETURN rc.name AS name, rc.totalRiskScore AS score, rc.riskLevel AS riskLevel,
@@ -670,6 +716,80 @@ async def get_deal_graph(deal_id: str):
             "label": relation_type,
             "riskTransfer": round(rel_score * 0.3) if rel_tier == 1 else round(rel_score * 0.1),
         })
+
+    # 6. 관련기업의 카테고리 + 엔티티 노드
+    for rel_name in all_related.keys():
+        # 관련기업 카테고리
+        rel_cat_query = """
+        MATCH (c:Company {name: $companyName})-[:HAS_CATEGORY]->(rc:RiskCategory)
+        WHERE rc.score > 0
+        RETURN rc.code AS code, rc.name AS name, rc.score AS score,
+               rc.weight AS weight, rc.weightedScore AS weightedScore
+        """
+        rel_cats = client.execute_read(rel_cat_query, {"companyName": rel_name}) or []
+        for rcat in rel_cats:
+            rcat_id = f"RC_{rel_name}_{rcat['code']}"
+            rcat_score = rcat.get("score", 0) or 0
+            rcat_weighted = rcat.get("weightedScore", 0) or 0
+            rcat_level = "FAIL" if rcat_weighted >= 15 else ("WARNING" if rcat_weighted >= 5 else "PASS")
+
+            nodes.append({
+                "id": rcat_id,
+                "name": rcat["name"],
+                "nodeType": "riskCategory",
+                "riskScore": rcat_score,
+                "riskLevel": rcat_level,
+                "tier": 2,
+                "categoryCode": rcat["code"],
+                "metadata": {"weight": rcat.get("weight", 0), "weightedScore": rcat_weighted, "company": rel_name},
+            })
+
+            links.append({
+                "source": rel_name,
+                "target": rcat_id,
+                "relationship": "HAS_CATEGORY",
+                "dependency": rcat.get("weight", 0) or 0,
+                "label": rcat["name"],
+                "riskTransfer": rcat_weighted,
+            })
+
+        # 관련기업 엔티티
+        rel_ent_query = """
+        MATCH (c:Company {name: $companyName})-[:HAS_CATEGORY]->(rc:RiskCategory)-[:HAS_ENTITY]->(re:RiskEntity)
+        WHERE rc.score > 0
+        RETURN re.name AS name, re.type AS type, re.score AS score,
+               rc.code AS catCode, rc.name AS catName
+        """
+        rel_ents = client.execute_read(rel_ent_query, {"companyName": rel_name}) or []
+        for rent in rel_ents:
+            rent_name = rent.get("name", "Unknown")
+            rent_cat = rent.get("catCode", "OTHER")
+            rent_id = f"RE_{rel_name}_{rent_cat}_{rent_name}"
+            if rent_id in entity_ids_seen:
+                continue
+            entity_ids_seen.add(rent_id)
+            rent_score = rent.get("score", 0) or 0
+            rent_level = "FAIL" if rent_score >= 30 else ("WARNING" if rent_score >= 10 else "PASS")
+
+            nodes.append({
+                "id": rent_id,
+                "name": rent_name,
+                "nodeType": "riskEntity",
+                "riskScore": rent_score,
+                "riskLevel": rent_level,
+                "tier": 3,
+                "metadata": {"type": rent.get("type", ""), "categoryCode": rent_cat, "company": rel_name},
+            })
+
+            rcat_id = f"RC_{rel_name}_{rent_cat}"
+            links.append({
+                "source": rcat_id,
+                "target": rent_id,
+                "relationship": "HAS_ENTITY",
+                "dependency": 0.5,
+                "label": rent.get("type", "ENTITY"),
+                "riskTransfer": rent_score,
+            })
 
     return {
         "schemaVersion": "v4",
