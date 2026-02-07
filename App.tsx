@@ -7,6 +7,8 @@ import MonitoringDashboard from './components/MonitoringDashboard';
 import GlobalDashboard from './components/GlobalDashboard';
 import Timeline from './components/Timeline';
 import ApiStatusBar from './components/ApiStatusBar';
+import { RiskPage } from './components/risk';
+import RiskShell from './components/risk-v2/layout/RiskShell';
 import { HurdleStatus, VerificationData, DealSummary, ScoringModule } from './types';
 
 // GLOBAL_DEALS 데이터는 원본 보존
@@ -124,7 +126,7 @@ const getAnalysisData = (caseId: string): VerificationData => {
 };
 
 const App: React.FC = () => {
-  const [viewMode, setViewMode] = useState<'analysis' | 'monitoring' | 'global'>('global');
+  const [viewMode, setViewMode] = useState<'analysis' | 'monitoring' | 'global' | 'risk' | 'risk-v2'>('risk-v2');
   const [selectedDealId, setSelectedDealId] = useState<string>('case1');
   const [leftWidth, setLeftWidth] = useState(42);
   const [isResizing, setIsResizing] = useState(false);
@@ -176,14 +178,26 @@ const App: React.FC = () => {
 
         {viewMode === 'global' && (
           <main className="flex-1 overflow-y-auto custom-scrollbar">
-            <GlobalDashboard 
-              deals={GLOBAL_DEALS} 
-              alerts={[]} 
+            <GlobalDashboard
+              deals={GLOBAL_DEALS}
+              alerts={[]}
               onDealClick={(id) => {
                 setSelectedDealId(id);
                 setViewMode('analysis');
-              }} 
+              }}
             />
+          </main>
+        )}
+
+        {viewMode === 'risk' && (
+          <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50">
+            <RiskPage />
+          </main>
+        )}
+
+        {viewMode === 'risk-v2' && (
+          <main className="flex-1 overflow-hidden">
+            <RiskShell />
           </main>
         )}
       </div>

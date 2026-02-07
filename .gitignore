@@ -25,3 +25,15 @@ dist-ssr
 
 # Claude Code
 .claude
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Temp files
+_screenshot_tmp.mjs
+_integration_test.mjs
+nul
+*.png
+.pdca-status.json
