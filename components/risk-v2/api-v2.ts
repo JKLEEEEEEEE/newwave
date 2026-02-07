@@ -32,6 +32,11 @@ import type {
   RiskLevelV2,
   EventType,
   SeverityV2,
+  TriagedEventV2,
+  SourceTier,
+  TriageLevel,
+  CaseV2,
+  CaseStatus,
 } from './types-v2';
 
 import { CATEGORY_DEFINITIONS_V2 } from './category-definitions';
@@ -55,12 +60,14 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<Api
   const url = `${BASE_URL}${endpoint}`;
 
   try {
+    // Content-Type은 body가 있는 요청(POST/PATCH)에만 설정 — GET에 설정하면 불필요한 CORS preflight 유발
+    const headers: Record<string, string> = { ...options?.headers as Record<string, string> };
+    if (options?.body) {
+      headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+    }
     const response = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -812,6 +819,112 @@ async function fetchBriefingV2(dealId: string): Promise<ApiResponseV2<BriefingRe
 }
 
 // ============================================
+// Smart Triage 이벤트 API
+// ============================================
+
+/** 트리아지된 이벤트 목록 조회 */
+async function fetchTriagedEventsV2(dealId: string, limit = 30): Promise<ApiResponseV2<TriagedEventV2[]>> {
+  const res = await fetchApi<any>(`/api/v4/deals/${encodeURIComponent(dealId)}/events/triaged?limit=${limit}`);
+  if (res.success && res.data?.events) {
+    const events: TriagedEventV2[] = res.data.events.map((e: any) => ({
+      id: e.id || '',
+      entityId: e.entityId || '',
+      title: e.title || '',
+      summary: e.summary || '',
+      type: (e.type as EventType) || 'NEWS',
+      score: e.score || 0,
+      severity: (e.severity as SeverityV2) || 'MEDIUM',
+      sourceName: e.sourceName || '',
+      sourceUrl: e.sourceUrl || '',
+      publishedAt: e.publishedAt || '',
+      urgency: e.urgency || 0,
+      confidence: e.confidence || 0,
+      triageScore: e.triageScore || 0,
+      triageLevel: (e.triageLevel || 'MEDIUM') as TriageLevel,
+      sourceTier: (e.sourceTier || 'COMMUNITY') as SourceTier,
+      sourceReliability: e.sourceReliability || 0,
+      hasConflict: e.hasConflict || false,
+      playbook: e.playbook || [],
+      categoryCode: e.categoryCode || '',
+      categoryName: e.categoryName || '',
+    }));
+    return success(events);
+  }
+
+  // API 실패 시 클라이언트 사이드 트리아지 폴백
+  return success([] as TriagedEventV2[]);
+}
+
+// ============================================
+// Case Management API
+// ============================================
+
+/** 케이스 목록 조회 */
+async function fetchCasesV2(dealId: string): Promise<ApiResponseV2<CaseV2[]>> {
+  const res = await fetchApi<any>(`/api/v4/deals/${encodeURIComponent(dealId)}/cases`);
+  if (res.success && res.data?.cases) {
+    return success(res.data.cases.map((c: any) => ({
+      id: c.id,
+      eventId: c.event_id,
+      eventTitle: c.event_title,
+      status: (c.status || 'OPEN') as CaseStatus,
+      assignee: c.assignee || '',
+      notes: c.notes || '',
+      priority: c.priority || 'MEDIUM',
+      createdAt: c.created_at || '',
+      updatedAt: c.updated_at || '',
+    })));
+  }
+  return success([] as CaseV2[]);
+}
+
+/** 케이스 생성 */
+async function createCaseV2(dealId: string, eventId: string, eventTitle: string, assignee = ''): Promise<ApiResponseV2<CaseV2>> {
+  const res = await fetchApi<any>(`/api/v4/deals/${encodeURIComponent(dealId)}/cases`, {
+    method: 'POST',
+    body: JSON.stringify({ event_id: eventId, event_title: eventTitle, assignee }),
+  });
+  if (res.success && res.data) {
+    const c = res.data;
+    return success({
+      id: c.id,
+      eventId: c.event_id,
+      eventTitle: c.event_title,
+      status: c.status as CaseStatus,
+      assignee: c.assignee || '',
+      notes: c.notes || '',
+      priority: c.priority || 'MEDIUM',
+      createdAt: c.created_at || '',
+      updatedAt: c.updated_at || '',
+    });
+  }
+  return { success: false, data: null as any, error: res.error || 'Failed to create case', timestamp: new Date().toISOString() };
+}
+
+/** 케이스 업데이트 */
+async function updateCaseV2(dealId: string, caseId: string, updates: Partial<{ status: CaseStatus; assignee: string; notes: string }>): Promise<ApiResponseV2<CaseV2>> {
+  const res = await fetchApi<any>(`/api/v4/deals/${encodeURIComponent(dealId)}/cases/${caseId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+  if (res.success && res.data) {
+    const c = res.data;
+    return success({
+      id: c.id,
+      eventId: c.event_id,
+      eventTitle: c.event_title,
+      status: c.status as CaseStatus,
+      assignee: c.assignee || '',
+      notes: c.notes || '',
+      priority: c.priority || 'MEDIUM',
+      createdAt: c.created_at || '',
+      updatedAt: c.updated_at || '',
+    });
+  }
+  return { success: false, data: null as any, error: res.error || 'Failed to update case', timestamp: new Date().toISOString() };
+}
+
+// ============================================
 // 건강 체크
 // ============================================
 
@@ -855,6 +968,12 @@ export const riskApiV2 = {
   queryNaturalLanguage: queryNaturalLanguageV2,
   fetchAIInsight: fetchAIInsightV2,
   fetchBriefing: fetchBriefingV2,
+  // Live Events (Smart Triage)
+  fetchTriagedEvents: fetchTriagedEventsV2,
+  // Case Management
+  fetchCases: fetchCasesV2,
+  createCase: createCaseV2,
+  updateCase: updateCaseV2,
   // 유틸
   checkApiHealth: checkApiHealthV2,
   // 상태

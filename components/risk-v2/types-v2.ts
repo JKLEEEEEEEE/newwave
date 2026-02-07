@@ -415,6 +415,60 @@ export interface WhatIfScenario {
   impacts: Partial<Record<CategoryCodeV2, number>>;
 }
 
+// ============================================
+// Live Events Triage 타입
+// ============================================
+
+/** 소스 신뢰도 등급 */
+export type SourceTier = 'OFFICIAL' | 'PRESS' | 'COMMUNITY' | 'BLOG';
+
+/** 트리아지 레벨 */
+export type TriageLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+
+/** 트리아지된 이벤트 (Smart Triage + Source Transparency) */
+export interface TriagedEventV2 extends RiskEventV2 {
+  /** 긴급도 0-100 (시간 기반 감쇠) */
+  urgency: number;
+  /** 신뢰도 0-100 (소스 신뢰 + 교차 참조) */
+  confidence: number;
+  /** 트리아지 점수 = severity*0.4 + urgency*0.3 + confidence*0.3 */
+  triageScore: number;
+  /** 트리아지 레벨 */
+  triageLevel: TriageLevel;
+  /** 소스 등급 */
+  sourceTier: SourceTier;
+  /** 소스 신뢰도 0-1 */
+  sourceReliability: number;
+  /** 충돌 여부 (동일 주제 상반 보도) */
+  hasConflict?: boolean;
+  /** 대응 플레이북 */
+  playbook?: string[];
+  /** 연관 카테고리 코드 */
+  categoryCode?: string;
+  /** 연관 카테고리 이름 */
+  categoryName?: string;
+}
+
+// ============================================
+// Case Management 타입
+// ============================================
+
+/** 케이스 상태 */
+export type CaseStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'DISMISSED';
+
+/** 케이스 (경량 워크플로우) */
+export interface CaseV2 {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  status: CaseStatus;
+  assignee: string;
+  notes: string;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** AI 브리핑 응답 */
 export interface BriefingResponse {
   company: string;

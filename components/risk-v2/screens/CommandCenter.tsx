@@ -15,7 +15,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 
 // 타입
-import type { RiskCategoryV2, RiskEventV2 } from '../types-v2';
+import type { RiskCategoryV2, RiskEventV2, TriagedEventV2, CaseV2, TriageLevel, SourceTier } from '../types-v2';
+
+// API
+import { riskApiV2 } from '../api-v2';
 
 // 디자인 토큰
 import { RISK_COLORS, CATEGORY_COLORS, SEVERITY_COLORS, ANIMATION } from '../design-tokens';
@@ -106,6 +109,30 @@ function getScoreDelta(data: number[]): number {
 const LIVE_POLL_INTERVAL = 30_000; // 30초 폴링
 
 // ============================================
+// Triage 색상/레이블 상수
+// ============================================
+const TRIAGE_COLORS: Record<string, { color: string; bg: string }> = {
+  CRITICAL: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' },
+  HIGH:     { color: '#f97316', bg: 'rgba(249, 115, 22, 0.15)' },
+  MEDIUM:   { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
+  LOW:      { color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' },
+};
+
+const SOURCE_TIER_LABELS: Record<string, { label: string; color: string; icon: string }> = {
+  OFFICIAL:  { label: '공식', color: '#3b82f6', icon: '\uD83C\uDFDB\uFE0F' },
+  PRESS:     { label: '언론', color: '#8b5cf6', icon: '\uD83D\uDCF0' },
+  COMMUNITY: { label: '커뮤', color: '#f59e0b', icon: '\uD83D\uDCAC' },
+  BLOG:      { label: '블로그', color: '#6b7280', icon: '\uD83D\uDCDD' },
+};
+
+const CASE_STATUS_COLORS: Record<string, { color: string; label: string }> = {
+  OPEN:        { color: '#ef4444', label: '열림' },
+  IN_PROGRESS: { color: '#f59e0b', label: '처리중' },
+  RESOLVED:    { color: '#10b981', label: '해결' },
+  DISMISSED:   { color: '#6b7280', label: '각하' },
+};
+
+// ============================================
 // 메인 컴포넌트
 // ============================================
 export default function CommandCenter() {
@@ -118,28 +145,38 @@ export default function CommandCenter() {
   const [liveActive, setLiveActive] = useState(true);
   const pollCountRef = useRef(0);
 
+  // --- Smart Triage 상태 ---
+  const [triagedEvents, setTriagedEvents] = useState<TriagedEventV2[]>([]);
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageFilter, setTriageFilter] = useState<string>('ALL');
+  const [selectedTriageEvent, setSelectedTriageEvent] = useState<TriagedEventV2 | null>(null);
+  const [showFullView, setShowFullView] = useState(false);
+
+  // --- Case Management 상태 ---
+  const [cases, setCases] = useState<CaseV2[]>([]);
+  const [creatingCase, setCreatingCase] = useState<string | null>(null);
+
   // --- 요약 데이터 계산 ---
   const summary = useMemo(() => {
     const total = deals.length;
     const active = deals.filter(d => d.status === 'ACTIVE').length;
-    return { total, active: active || total, avgRisk: dealDetail?.mainCompany.totalRiskScore ?? 0 };
-  }, [deals, dealDetail]);
+    // 모든 딜의 score 평균 (deals API에서 이미 score를 제공)
+    const scores = deals.map(d => d.score ?? 0).filter(s => s > 0);
+    const avgRisk = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+    return { total, active: active || total, avgRisk };
+  }, [deals]);
 
   const levelCounts = useMemo(() => {
     const counts = { PASS: 0, WARNING: 0, FAIL: 0 };
-    // If we have deal detail, count the main company and related companies
-    if (dealDetail) {
-      counts[dealDetail.mainCompany.riskLevel]++;
-      for (const rc of dealDetail.relatedCompanies) {
-        counts[rc.riskLevel]++;
-      }
+    // 모든 딜의 riskLevel 집계 (deals API에서 이미 제공)
+    for (const deal of deals) {
+      const level = deal.riskLevel ?? getScoreLevel(deal.score ?? 0);
+      if (level === 'FAIL') counts.FAIL++;
+      else if (level === 'WARNING') counts.WARNING++;
+      else counts.PASS++;
     }
-    // Fill remaining deals as PASS
-    const total = deals.length;
-    const counted = counts.PASS + counts.WARNING + counts.FAIL;
-    if (counted < total) counts.PASS += (total - counted);
     return counts;
-  }, [deals, dealDetail]);
+  }, [deals]);
 
   const donutData = useMemo(() => [
     { name: 'PASS', value: levelCounts.PASS, color: RISK_COLORS.PASS.primary },
@@ -207,8 +244,84 @@ export default function CommandCenter() {
     return cache;
   }, [deals]);
 
-  // --- 카테고리 클릭 핸들러 ---
+  // --- Smart Triage: 딜 선택 시 트리아지 이벤트 로드 ---
+  useEffect(() => {
+    if (!selectedDealId) {
+      setTriagedEvents([]);
+      return;
+    }
+    // 딜 전환 시 이전 데이터 즉시 클리어 + 필터/선택 초기화
+    setTriagedEvents([]);
+    setCases([]);
+    setTriageFilter('ALL');
+    setSelectedTriageEvent(null);
+    let cancelled = false;
+    setTriageLoading(true);
+    (async () => {
+      try {
+        const [triageRes, casesRes] = await Promise.all([
+          riskApiV2.fetchTriagedEvents(selectedDealId),
+          riskApiV2.fetchCases(selectedDealId),
+        ]);
+        if (cancelled) return;
+        if (triageRes.success) setTriagedEvents(triageRes.data);
+        if (casesRes.success) setCases(casesRes.data);
+      } catch (err) {
+        console.error('[Triage] Load error:', err);
+      } finally {
+        if (!cancelled) setTriageLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDealId]);
+
+  // --- Triage 필터링 ---
+  const filteredTriaged = useMemo(() => {
+    if (triageFilter === 'ALL') return triagedEvents;
+    return triagedEvents.filter(e => e.triageLevel === triageFilter);
+  }, [triagedEvents, triageFilter]);
+
+  // --- Triage 요약 ---
+  const triageSummary = useMemo(() => ({
+    total: triagedEvents.length,
+    critical: triagedEvents.filter(e => e.triageLevel === 'CRITICAL').length,
+    high: triagedEvents.filter(e => e.triageLevel === 'HIGH').length,
+    medium: triagedEvents.filter(e => e.triageLevel === 'MEDIUM').length,
+    low: triagedEvents.filter(e => e.triageLevel === 'LOW').length,
+  }), [triagedEvents]);
+
+  // --- Case 생성 핸들러 ---
+  const handleCreateCase = useCallback(async (event: TriagedEventV2) => {
+    if (!selectedDealId) return;
+    setCreatingCase(event.id);
+    const res = await riskApiV2.createCase(selectedDealId, event.id, event.title);
+    if (res.success) {
+      setCases(prev => [res.data, ...prev]);
+    }
+    setCreatingCase(null);
+  }, [selectedDealId]);
+
+  // --- Case 상태 업데이트 핸들러 ---
+  const handleUpdateCase = useCallback(async (caseId: string, status: string) => {
+    if (!selectedDealId) return;
+    const res = await riskApiV2.updateCase(selectedDealId, caseId, { status: status as any });
+    if (res.success) {
+      setCases(prev => prev.map(c => c.id === caseId ? res.data : c));
+    }
+  }, [selectedDealId]);
+
+  // --- 이벤트의 케이스 찾기 ---
+  const getCaseForEvent = useCallback((eventId: string) => {
+    return cases.find(c => c.eventId === eventId);
+  }, [cases]);
+
+  // --- 카테고리 인라인 확장 (화면 이동 없이) ---
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const handleCategoryClick = (code: string) => {
+    setExpandedCategory(prev => prev === code ? null : code);
+  };
+  // 카테고리 → Deep Dive 명시적 이동 (버튼 클릭)
+  const handleCategoryDeepDive = (code: string) => {
     selectCategory(code as RiskCategoryV2['code']);
     setActiveView('deepdive');
   };
@@ -219,13 +332,10 @@ export default function CommandCenter() {
     setActiveView('deepdive');
   }, [selectDeal, setActiveView]);
 
-  // --- U16: 도넛 차트 세그먼트 클릭 → 해당 레벨 필터 ---
-  const handleDonutClick = useCallback((level: string) => {
-    // 선택된 딜이 있으면 해당 레벨의 카테고리로 드릴다운
-    if (selectedDealId) {
-      setActiveView('deepdive');
-    }
-  }, [selectedDealId, setActiveView]);
+  // --- U16: 도넛 차트 세그먼트 클릭 → 해당 레벨 이벤트 필터 ---
+  const handleDonutClick = useCallback((_level: string) => {
+    // 도넛 클릭 시 이벤트 필터만 변경 (화면 이동 없음)
+  }, []);
 
   return (
     <motion.div
@@ -266,7 +376,7 @@ export default function CommandCenter() {
           <GlassCard gradient="warning" className="p-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-400 mb-1">Avg Risk Score</p>
+                <p className="text-sm text-slate-400 mb-1">포트폴리오 평균 리스크</p>
                 <div className="flex items-center gap-3">
                   <ScoreGauge score={summary.avgRisk} size={80} label="Average" />
                 </div>
@@ -329,14 +439,13 @@ export default function CommandCenter() {
           Investment Deals
         </h2>
         <motion.div
-          key={`deals-${deals.length}`}
           className="flex flex-col gap-3"
           variants={containerVariants}
           initial="hidden"
           animate="visible"
         >
-          {/* U15: 로딩 스켈레톤 */}
-          {dealsLoading ? (
+          {/* U15: 로딩 스켈레톤 (초기 로딩에서만 — 이미 데이터가 있으면 유지) */}
+          {dealsLoading && deals.length === 0 ? (
             <>
               {[1, 2, 3].map((i) => (
                 <SkeletonCard key={i} />
@@ -368,31 +477,29 @@ export default function CommandCenter() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      {/* U6: 선택 딜 = ScoreGauge, 미선택 딜 = 미니 상태 인디케이터 */}
-                      {company ? (
-                        <ScoreGauge
-                          score={company.totalRiskScore}
-                          size={60}
-                          directScore={company.directScore}
-                          propagatedScore={company.propagatedScore}
-                        />
-                      ) : isSelected && dealDetailLoading ? (
-                        /* U15: 딜 상세 로딩 중 */
-                        <div className="w-[60px] h-[60px] rounded-full bg-slate-800/50 animate-pulse flex items-center justify-center">
-                          <span className="text-slate-500 text-[10px]">...</span>
-                        </div>
-                      ) : (
-                        /* U6: 미선택 딜 미니 점수 표시 */
-                        <ScoreGauge
-                          score={deal.score ?? 0}
-                          size={48}
-                        />
-                      )}
+                      {/* 딜 점수 게이지 — 항상 deals API 기준 (일관된 표시) */}
+                      <ScoreGauge
+                        score={company ? company.totalRiskScore : (deal.score ?? 0)}
+                        size={isSelected ? 60 : 48}
+                        directScore={company?.directScore}
+                        propagatedScore={company?.propagatedScore}
+                      />
                       <div>
                         <h3 className="text-white font-medium text-base">{deal.name}</h3>
                         <p className="text-slate-400 text-sm mt-0.5">
-                          {deal.targetCompanyName} {company ? `(${company.ticker}) / ${company.sector}` : ''}
+                          {deal.targetCompanyName} {company ? `/ ${company.sector}` : ''}
                         </p>
+                        {/* 점수 구성 표시 (선택된 딜) */}
+                        {isSelected && company && (company.directScore != null || company.propagatedScore != null) && (
+                          <p className="text-slate-500 text-[10px] mt-1 flex items-center gap-1.5">
+                            <span className="text-slate-400">직접 {company.directScore ?? 0}</span>
+                            <span className="text-slate-600">+</span>
+                            <span className="text-slate-400">전이 {company.propagatedScore ?? 0}</span>
+                            {company.propagatedScore > 0 && (
+                              <span className="text-slate-600 text-[9px]">(관련기업 영향)</span>
+                            )}
+                          </p>
+                        )}
                         {/* Last event indicator */}
                         {isSelected && recentEvents.length > 0 && (
                           <p className="text-slate-500 text-[10px] mt-1 flex items-center gap-1">
@@ -451,117 +558,219 @@ export default function CommandCenter() {
       </motion.div>
 
       {/* ============================================ */}
-      {/* 4. 최근 이벤트 피드 (우측) */}
+      {/* 4. Smart Triage Live Events (우측) */}
       {/* ============================================ */}
       <motion.div className="col-span-4" variants={itemVariants}>
-        <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-          {/* LIVE 펄스 인디케이터 */}
-          {liveActive && selectedDealId ? (
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
-            </span>
-          ) : (
-            <span className="text-red-400">&#9679;</span>
-          )}
-          <span>Live Events</span>
-          {liveActive && selectedDealId && (
-            <span className="text-[10px] font-mono text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded ml-1">
-              LIVE
-            </span>
-          )}
-          {newEventIds.size > 0 && (
-            <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="text-[10px] font-bold text-white bg-red-500 rounded-full w-5 h-5 flex items-center justify-center"
-            >
-              {newEventIds.size}
-            </motion.span>
-          )}
-        </h2>
-        <div className="flex flex-col gap-2">
-          {/* U15: 로딩 / 빈 데이터 / 데이터 있음 구분 */}
-          {dealsLoading || dealDetailLoading ? (
-            /* 로딩 중: 스켈레톤 표시 */
+        {/* --- 헤더: LIVE 인디케이터 + 케이스 카운터 + View All --- */}
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            {liveActive && selectedDealId ? (
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+              </span>
+            ) : (
+              <span className="text-red-400">&#9679;</span>
+            )}
+            <span>Live Events{selectedDeal ? ` — ${selectedDeal.targetCompanyName}` : ''}</span>
+            {liveActive && selectedDealId && (
+              <span className="text-[10px] font-mono text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded ml-1">
+                LIVE
+              </span>
+            )}
+            {newEventIds.size > 0 && (
+              <motion.span
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="text-[10px] font-bold text-white bg-red-500 rounded-full w-5 h-5 flex items-center justify-center"
+              >
+                {newEventIds.size}
+              </motion.span>
+            )}
+          </h2>
+          <div className="flex items-center gap-2">
+            {/* 활성 케이스 카운터 */}
+            {cases.filter(c => c.status === 'OPEN' || c.status === 'IN_PROGRESS').length > 0 && (
+              <span className="text-[10px] font-medium text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                {cases.filter(c => c.status === 'OPEN' || c.status === 'IN_PROGRESS').length} Cases
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* --- Triage 필터 탭 (심각도별 필터, 전체는 하단 "전체보기"로) --- */}
+        {triagedEvents.length > 0 && (
+          <div className="flex gap-1 mb-2">
+            {[
+              { key: 'CRITICAL', label: '긴급', count: triageSummary.critical },
+              { key: 'HIGH', label: '높음', count: triageSummary.high },
+              { key: 'MEDIUM', label: '보통', count: triageSummary.medium },
+              { key: 'LOW', label: '낮음', count: triageSummary.low },
+            ].filter(t => t.count > 0).map(tab => {
+              const isActive = triageFilter === tab.key;
+              const tc = TRIAGE_COLORS[tab.key] ?? { color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.15)' };
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setTriageFilter(prev => prev === tab.key ? 'ALL' : tab.key)}
+                  className={`text-[10px] font-medium px-2 py-0.5 rounded transition-all ${
+                    isActive ? 'ring-1' : 'opacity-60 hover:opacity-100'
+                  }`}
+                  style={{
+                    color: isActive ? tc.color : '#94a3b8',
+                    backgroundColor: isActive ? tc.bg : 'transparent',
+                    borderColor: tc.color,
+                  }}
+                >
+                  {tab.label} ({tab.count})
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* --- 이벤트 목록 --- */}
+        <div className="flex flex-col gap-2 max-h-[520px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(148,163,184,0.2) transparent' }}>
+          {(triageLoading && triagedEvents.length === 0) || (dealsLoading && !selectedDealId) ? (
             <>
               {[1, 2, 3].map((i) => (
                 <div key={i} className="p-3 space-y-2 bg-slate-900/40 border border-white/5 rounded-2xl backdrop-blur-xl">
                   <div className="flex items-start gap-2">
-                    <div className="w-2 h-2 rounded-full bg-slate-700/30 animate-pulse mt-1.5 flex-shrink-0" />
+                    <div className="w-8 h-8 rounded-lg bg-slate-700/30 animate-pulse flex-shrink-0" />
                     <div className="flex-1 space-y-2">
                       <SkeletonLine width="80%" />
                       <SkeletonLine width="100%" />
-                      <div className="flex justify-between">
-                        <SkeletonLine width="50px" />
-                        <SkeletonLine width="70px" />
+                      <div className="flex gap-2">
+                        <SkeletonLine width="40px" />
+                        <SkeletonLine width="40px" />
+                        <SkeletonLine width="40px" />
                       </div>
                     </div>
                   </div>
                 </div>
               ))}
             </>
-          ) : recentEvents.length > 0 ? (
+          ) : filteredTriaged.length > 0 ? (
             <AnimatePresence mode="popLayout">
-              {recentEvents.map((event, idx) => {
+              {filteredTriaged.slice(0, showFullView ? undefined : 8).map((event, idx) => {
                 const isNew = newEventIds.has(event.id);
-                const sevColor = SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.MEDIUM;
+                const tc = TRIAGE_COLORS[event.triageLevel] ?? TRIAGE_COLORS.MEDIUM;
+                const st = SOURCE_TIER_LABELS[event.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY;
+                const eventCase = getCaseForEvent(event.id);
+                const isCreatingThis = creatingCase === event.id;
+
                 return (
                   <motion.div
                     key={event.id}
                     layout
-                    initial={{ opacity: 0, y: -20, scale: 0.95 }}
-                    animate={{
-                      opacity: 1,
-                      y: 0,
-                      scale: 1,
-                      ...(isNew ? {
-                        boxShadow: ['0 0 0px rgba(239,68,68,0)', '0 0 20px rgba(239,68,68,0.4)', '0 0 0px rgba(239,68,68,0)'],
-                      } : {}),
-                    }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    transition={{ delay: idx * 0.03, duration: 0.3, layout: { duration: 0.2 } }}
+                    initial={{ opacity: 0, y: -10, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1, ...(isNew ? { boxShadow: ['0 0 0px rgba(239,68,68,0)', '0 0 15px rgba(239,68,68,0.3)', '0 0 0px rgba(239,68,68,0)'] } : {}) }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ delay: idx * 0.02, duration: 0.25, layout: { duration: 0.15 } }}
                     className="rounded-2xl"
                   >
                     <GlassCard
-                      className={`p-3 transition-all ${isNew ? 'ring-1 ring-red-500/50' : ''}`}
+                      hover
+                      onClick={() => setSelectedTriageEvent(event)}
+                      className={`p-3 transition-all cursor-pointer ${isNew ? 'ring-1 ring-red-500/50' : ''} ${selectedTriageEvent?.id === event.id ? 'ring-1 ring-purple-500/50' : ''}`}
                     >
-                      <div className="flex items-start gap-2">
-                        {/* Severity 도트 */}
-                        <span
-                          className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: sevColor.color }}
-                        />
+                      <div className="flex items-start gap-2.5">
+                        {/* 트리아지 점수 뱃지 */}
+                        <div
+                          className="flex flex-col items-center justify-center w-9 h-9 rounded-lg flex-shrink-0"
+                          style={{ backgroundColor: tc.bg, border: `1px solid ${tc.color}30` }}
+                        >
+                          <span className="text-sm font-bold leading-none" style={{ color: tc.color }}>
+                            {Math.round(event.triageScore)}
+                          </span>
+                          <span className="text-[7px] font-medium leading-none mt-0.5" style={{ color: tc.color }}>
+                            {event.triageLevel}
+                          </span>
+                        </div>
+
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-0.5">
+                          {/* 헤더: 타입 + 소스 등급 + 충돌 + NEW */}
+                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                             <span className="text-xs">
                               {event.type === 'DISCLOSURE' ? '\uD83D\uDCCB' : event.type === 'NEWS' ? '\uD83D\uDCF0' : '\u26A0\uFE0F'}
                             </span>
-                            <span className="text-[10px] text-slate-500 font-medium uppercase">
-                              {event.type === 'DISCLOSURE' ? 'DART' : event.type === 'NEWS' ? '\uB274\uC2A4' : '\uC774\uC288'}
+                            {/* Source Tier 뱃지 */}
+                            <span
+                              className="text-[9px] font-medium px-1 py-0.5 rounded"
+                              style={{ color: st.color, backgroundColor: st.color + '15' }}
+                            >
+                              {st.icon} {st.label}
                             </span>
-                            {isNew && (
-                              <motion.span
-                                initial={{ scale: 0 }}
-                                animate={{ scale: 1 }}
-                                className="text-[9px] font-bold text-white bg-red-500 px-1 rounded"
+                            {/* 충돌 뱃지 */}
+                            {event.hasConflict && (
+                              <span className="text-[9px] font-medium text-amber-400 bg-amber-500/10 px-1 rounded">
+                                &#9888; Conflict
+                              </span>
+                            )}
+                            {/* 케이스 뱃지 */}
+                            {eventCase && (
+                              <span
+                                className="text-[9px] font-medium px-1 rounded"
+                                style={{
+                                  color: CASE_STATUS_COLORS[eventCase.status]?.color ?? '#6b7280',
+                                  backgroundColor: (CASE_STATUS_COLORS[eventCase.status]?.color ?? '#6b7280') + '15',
+                                }}
                               >
-                                NEW
-                              </motion.span>
+                                {CASE_STATUS_COLORS[eventCase.status]?.label ?? eventCase.status}
+                              </span>
+                            )}
+                            {isNew && (
+                              <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} className="text-[9px] font-bold text-white bg-red-500 px-1 rounded">NEW</motion.span>
                             )}
                           </div>
+
+                          {/* 제목 */}
                           <p className="text-sm text-white font-medium truncate">{event.title}</p>
-                          <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{event.summary}</p>
-                          <div className="flex items-center justify-between mt-2">
-                            <span
-                              className="text-xs font-medium px-1.5 py-0.5 rounded-full"
-                              style={{ color: sevColor.color, backgroundColor: sevColor.bg }}
-                            >
-                              {getSeverityLabel(event.severity)}
-                            </span>
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                              {event.sourceName && <span>{event.sourceName}</span>}
-                              <span>{formatRelativeTime(event.publishedAt)}</span>
+                          {/* 요약 */}
+                          <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{event.summary}</p>
+
+                          {/* 3축 미니 바 (Severity / Urgency / Confidence) */}
+                          <div className="flex gap-2 mt-1.5">
+                            {[
+                              { label: 'S', value: event.score, max: 100, color: '#ef4444' },
+                              { label: 'U', value: event.urgency, max: 100, color: '#f59e0b' },
+                              { label: 'C', value: event.confidence, max: 100, color: '#3b82f6' },
+                            ].map(axis => (
+                              <div key={axis.label} className="flex items-center gap-1 flex-1">
+                                <span className="text-[8px] text-slate-500 w-2">{axis.label}</span>
+                                <div className="flex-1 h-1 rounded-full bg-slate-700/50">
+                                  <div
+                                    className="h-full rounded-full transition-all duration-500"
+                                    style={{ width: `${Math.min((axis.value / axis.max) * 100, 100)}%`, backgroundColor: axis.color }}
+                                  />
+                                </div>
+                                <span className="text-[8px] text-slate-500 w-4 text-right">{axis.value}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* 푸터: 카테고리 + 소스명 + 시간 + 케이스 버튼 */}
+                          <div className="flex items-center justify-between mt-1.5">
+                            <div className="flex items-center gap-1.5">
+                              {event.categoryName && (
+                                <span className="text-[9px] text-slate-500 bg-slate-800/50 px-1 rounded">{event.categoryName}</span>
+                              )}
+                              {event.sourceName && (
+                                <span className="text-[9px] text-slate-500">{event.sourceName}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {/* 케이스 생성/보기 버튼 */}
+                              {!eventCase ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleCreateCase(event); }}
+                                  disabled={isCreatingThis}
+                                  className="text-[9px] font-medium text-purple-400 hover:text-purple-300 bg-purple-500/10 px-1.5 py-0.5 rounded transition-colors disabled:opacity-50"
+                                >
+                                  {isCreatingThis ? '...' : '+ Case'}
+                                </button>
+                              ) : null}
+                              <span className="text-[9px] text-slate-500">{formatRelativeTime(event.publishedAt)}</span>
                             </div>
                           </div>
                         </div>
@@ -571,17 +780,376 @@ export default function CommandCenter() {
                 );
               })}
             </AnimatePresence>
+          ) : recentEvents.length > 0 ? (
+            /* 트리아지 API 실패 시 기존 이벤트 폴백 */
+            <AnimatePresence mode="popLayout">
+              {recentEvents.map((event, idx) => {
+                const isNew = newEventIds.has(event.id);
+                const sevColor = SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.MEDIUM;
+                return (
+                  <motion.div key={event.id} layout initial={{ opacity: 0, y: -20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.95 }} transition={{ delay: idx * 0.03, duration: 0.3 }} className="rounded-2xl">
+                    <GlassCard className={`p-3 ${isNew ? 'ring-1 ring-red-500/50' : ''}`}>
+                      <div className="flex items-start gap-2">
+                        <span className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: sevColor.color }} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white font-medium truncate">{event.title}</p>
+                          <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{event.summary}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-xs font-medium px-1.5 py-0.5 rounded-full" style={{ color: sevColor.color, backgroundColor: sevColor.bg }}>{getSeverityLabel(event.severity)}</span>
+                            <span className="text-xs text-slate-500">{formatRelativeTime(event.publishedAt)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           ) : (
-            /* 빈 데이터: EmptyState 컴포넌트 사용 */
-            <EmptyState
-              icon="&#128240;"
-              title="최근 이벤트가 없습니다"
-              description="딜을 선택하면 관련 이벤트가 표시됩니다"
-              variant="card"
-            />
+            <EmptyState icon="&#128240;" title={selectedDealId ? '이 기업의 이벤트가 없습니다' : '딜을 선택해주세요'} description={selectedDealId ? '선택된 기업에 대한 최근 리스크 이벤트가 감지되지 않았습니다' : '좌측에서 투자 건을 선택하면 관련 이벤트가 표시됩니다'} variant="card" />
           )}
         </div>
+
+        {/* --- 하단: 전체보기 버튼 --- */}
+        {triagedEvents.length > 0 && (
+          <button
+            onClick={() => setShowFullView(true)}
+            className="w-full mt-2 py-2 text-sm font-medium text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-xl transition-all flex items-center justify-center gap-2"
+          >
+            <span>전체보기</span>
+            <span className="text-xs text-purple-400/70">({triagedEvents.length}건)</span>
+          </button>
+        )}
       </motion.div>
+
+      {/* ============================================ */}
+      {/* 4-b. Event Detail 슬라이드아웃 패널 */}
+      {/* ============================================ */}
+      <AnimatePresence>
+        {selectedTriageEvent && (
+          <motion.div
+            initial={{ x: 420, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 420, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className="fixed inset-y-0 right-0 w-[400px] z-50 bg-slate-950/95 backdrop-blur-xl border-l border-white/10 shadow-2xl overflow-y-auto"
+          >
+            {/* 패널 헤더 */}
+            <div className="sticky top-0 z-10 bg-slate-950/90 backdrop-blur-md px-5 py-4 border-b border-white/5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-white font-semibold text-base">Event Detail</h3>
+                <button
+                  onClick={() => setSelectedTriageEvent(null)}
+                  className="text-slate-400 hover:text-white text-lg transition-colors"
+                >
+                  &#10005;
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {/* 트리아지 점수 큰 표시 */}
+              <div className="flex items-center gap-4">
+                <div
+                  className="flex flex-col items-center justify-center w-16 h-16 rounded-xl"
+                  style={{
+                    backgroundColor: (TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).bg,
+                    border: `2px solid ${(TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).color}40`,
+                  }}
+                >
+                  <span className="text-2xl font-bold" style={{ color: (TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).color }}>
+                    {Math.round(selectedTriageEvent.triageScore)}
+                  </span>
+                  <span className="text-[9px] font-medium" style={{ color: (TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).color }}>
+                    TRIAGE
+                  </span>
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span
+                      className="text-xs font-medium px-2 py-0.5 rounded-full"
+                      style={{ color: (TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).color, backgroundColor: (TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).bg }}
+                    >
+                      {selectedTriageEvent.triageLevel}
+                    </span>
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ color: (SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).color, backgroundColor: (SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).color + '15' }}>
+                      {(SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).icon} {(SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).label}
+                    </span>
+                    {selectedTriageEvent.hasConflict && (
+                      <span className="text-xs font-medium text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">&#9888; Conflict</span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Source: {selectedTriageEvent.sourceName || 'Unknown'} (Reliability: {Math.round(selectedTriageEvent.sourceReliability * 100)}%)
+                  </p>
+                </div>
+              </div>
+
+              {/* 제목 + 요약 */}
+              <div>
+                <h4 className="text-white font-medium text-base mb-2">{selectedTriageEvent.title}</h4>
+                <p className="text-sm text-slate-400 leading-relaxed">{selectedTriageEvent.summary || '요약 정보가 제공되지 않았습니다.'}</p>
+                {/* 관련 정보 컨텍스트 */}
+                {selectedTriageEvent.entityId && (
+                  <div className="mt-2 p-2 bg-slate-800/40 rounded-lg">
+                    <p className="text-[11px] text-slate-500">관련 대상</p>
+                    <p className="text-sm text-white">{selectedTriageEvent.entityId}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* 위험 평가 요약 */}
+              <div className="p-3 rounded-xl" style={{
+                backgroundColor: (TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).bg,
+                border: `1px solid ${(TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).color}20`,
+              }}>
+                <p className="text-xs font-medium mb-1.5" style={{ color: (TRIAGE_COLORS[selectedTriageEvent.triageLevel] ?? TRIAGE_COLORS.MEDIUM).color }}>
+                  위험 평가
+                </p>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  {selectedTriageEvent.triageLevel === 'CRITICAL' || selectedTriageEvent.triageLevel === 'HIGH'
+                    ? `이 이벤트는 ${selectedTriageEvent.categoryName || '해당'} 카테고리에서 높은 위험도로 식별되었습니다. ${selectedTriageEvent.score >= 60 ? '심각도가 매우 높으며 ' : ''}${selectedTriageEvent.urgency >= 50 ? '최근 발생하여 시급한 대응이 필요합니다.' : '시간이 경과하였으나 지속적 모니터링이 필요합니다.'}`
+                    : `이 이벤트는 ${selectedTriageEvent.categoryName || '해당'} 카테고리에서 ${selectedTriageEvent.triageLevel === 'MEDIUM' ? '중간' : '낮은'} 수준으로 평가되었습니다. ${selectedTriageEvent.confidence >= 70 ? '신뢰할 수 있는 출처에서 확인되었습니다.' : '추가 소스 확인이 권장됩니다.'}`
+                  }
+                </p>
+              </div>
+
+              {/* 3축 상세 바 */}
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500 font-medium">Triage 3축 분석</p>
+                {[
+                  { label: '심각도 (Severity)', value: selectedTriageEvent.score, color: '#ef4444', desc: '이벤트 자체의 위험 수준' },
+                  { label: '긴급도 (Urgency)', value: selectedTriageEvent.urgency, color: '#f59e0b', desc: '발생 시점 기반 시간 감쇠' },
+                  { label: '신뢰도 (Confidence)', value: selectedTriageEvent.confidence, color: '#3b82f6', desc: '소스 등급 기반 정보 신뢰도' },
+                ].map(axis => (
+                  <div key={axis.label}>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs text-slate-300">{axis.label}</span>
+                      <span className="text-xs font-medium" style={{ color: axis.color }}>{axis.value}/100</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-700/50">
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(axis.value, 100)}%`, backgroundColor: axis.color }} />
+                    </div>
+                    <p className="text-[10px] text-slate-600 mt-0.5">{axis.desc}</p>
+                  </div>
+                ))}
+                <div className="text-[10px] text-slate-500 pt-1 border-t border-white/5">
+                  산출: 심각도×0.4 + 긴급도×0.3 + 신뢰도×0.3 = <span className="text-white font-medium">{selectedTriageEvent.triageScore.toFixed(1)}</span>
+                </div>
+              </div>
+
+              {/* 동일 카테고리 이벤트 현황 */}
+              {(() => {
+                const sameCat = triagedEvents.filter(e => e.categoryCode === selectedTriageEvent.categoryCode && e.id !== selectedTriageEvent.id);
+                if (sameCat.length === 0) return null;
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-slate-500 font-medium">동일 카테고리 ({selectedTriageEvent.categoryName}) 이벤트 {sameCat.length}건</p>
+                    <div className="space-y-1 max-h-[120px] overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(148,163,184,0.2) transparent' }}>
+                      {sameCat.slice(0, 5).map(e => (
+                        <div
+                          key={e.id}
+                          onClick={() => setSelectedTriageEvent(e)}
+                          className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer transition-colors"
+                        >
+                          <span className="text-[10px] font-bold w-5 text-center" style={{ color: (TRIAGE_COLORS[e.triageLevel] ?? TRIAGE_COLORS.MEDIUM).color }}>
+                            {Math.round(e.triageScore)}
+                          </span>
+                          <span className="text-[11px] text-slate-300 truncate flex-1">{e.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 메타데이터 */}
+              <div className="space-y-1.5">
+                <p className="text-xs text-slate-500 font-medium">상세 정보</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="text-[11px]"><span className="text-slate-500">유형:</span> <span className="text-white">{selectedTriageEvent.type === 'NEWS' ? '뉴스' : selectedTriageEvent.type === 'DISCLOSURE' ? '공시' : '이슈'}</span></div>
+                  <div className="text-[11px]"><span className="text-slate-500">카테고리:</span> <span className="text-white">{selectedTriageEvent.categoryName || '-'}</span></div>
+                  <div className="text-[11px]"><span className="text-slate-500">발행일:</span> <span className="text-white">{selectedTriageEvent.publishedAt ? formatDate(selectedTriageEvent.publishedAt) : '-'}</span></div>
+                  <div className="text-[11px]"><span className="text-slate-500">경과:</span> <span className="text-white">{selectedTriageEvent.publishedAt ? formatRelativeTime(selectedTriageEvent.publishedAt) : '-'}</span></div>
+                  <div className="text-[11px]"><span className="text-slate-500">출처:</span> <span className="text-white">{selectedTriageEvent.sourceName || '미확인'}</span></div>
+                  <div className="text-[11px]"><span className="text-slate-500">소스등급:</span> <span className="text-white">{(SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).label} ({Math.round(selectedTriageEvent.sourceReliability * 100)}%)</span></div>
+                </div>
+                {selectedTriageEvent.sourceUrl && (
+                  <a href={selectedTriageEvent.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-purple-400 hover:text-purple-300 underline break-all block mt-1">
+                    원문 보기 &#8599;
+                  </a>
+                )}
+              </div>
+
+              {/* Playbook 액션 */}
+              {selectedTriageEvent.playbook && selectedTriageEvent.playbook.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs text-slate-500 font-medium uppercase">Playbook Actions</p>
+                  <div className="space-y-1">
+                    {selectedTriageEvent.playbook.map((action, i) => (
+                      <div key={i} className="flex items-center gap-2 text-[11px] text-slate-300 bg-slate-800/40 rounded-lg px-3 py-1.5">
+                        <span className="text-purple-400 text-xs">{i + 1}.</span>
+                        {action}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 케이스 관리 섹션 */}
+              <div className="space-y-2 pt-2 border-t border-white/5">
+                <p className="text-xs text-slate-500 font-medium uppercase">Case Management</p>
+                {(() => {
+                  const eventCase = getCaseForEvent(selectedTriageEvent.id);
+                  if (eventCase) {
+                    const csc = CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN;
+                    return (
+                      <div className="bg-slate-800/40 rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-white font-medium">Case #{eventCase.id}</span>
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ color: csc.color, backgroundColor: csc.color + '15' }}>
+                            {csc.label}
+                          </span>
+                        </div>
+                        {eventCase.assignee && (
+                          <p className="text-[10px] text-slate-400">Assignee: {eventCase.assignee}</p>
+                        )}
+                        <div className="flex gap-1.5 mt-1">
+                          {eventCase.status === 'OPEN' && (
+                            <button onClick={() => handleUpdateCase(eventCase.id, 'IN_PROGRESS')} className="text-[10px] font-medium text-amber-400 bg-amber-500/10 px-2 py-1 rounded hover:bg-amber-500/20 transition-colors">
+                              Start
+                            </button>
+                          )}
+                          {(eventCase.status === 'OPEN' || eventCase.status === 'IN_PROGRESS') && (
+                            <>
+                              <button onClick={() => handleUpdateCase(eventCase.id, 'RESOLVED')} className="text-[10px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded hover:bg-emerald-500/20 transition-colors">
+                                Resolve
+                              </button>
+                              <button onClick={() => handleUpdateCase(eventCase.id, 'DISMISSED')} className="text-[10px] font-medium text-slate-400 bg-slate-500/10 px-2 py-1 rounded hover:bg-slate-500/20 transition-colors">
+                                Dismiss
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <button
+                      onClick={() => handleCreateCase(selectedTriageEvent)}
+                      disabled={creatingCase === selectedTriageEvent.id}
+                      className="w-full text-sm font-medium text-purple-400 bg-purple-500/10 hover:bg-purple-500/20 px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {creatingCase === selectedTriageEvent.id ? 'Creating...' : '+ Create Case'}
+                    </button>
+                  );
+                })()}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ============================================ */}
+      {/* 4-c. Full View 오버레이 */}
+      {/* ============================================ */}
+      <AnimatePresence>
+        {showFullView && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-lg overflow-y-auto"
+          >
+            <div className="max-w-4xl mx-auto p-8">
+              {/* 헤더 */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-white">All Triaged Events</h2>
+                  <p className="text-sm text-slate-400 mt-1">{triagedEvents.length} events for {selectedDealId}</p>
+                </div>
+                <button
+                  onClick={() => setShowFullView(false)}
+                  className="text-slate-400 hover:text-white text-2xl transition-colors px-3 py-1"
+                >
+                  &#10005;
+                </button>
+              </div>
+
+              {/* 통계 바 */}
+              <div className="grid grid-cols-4 gap-3 mb-6">
+                {[
+                  { level: 'CRITICAL', count: triageSummary.critical },
+                  { level: 'HIGH', count: triageSummary.high },
+                  { level: 'MEDIUM', count: triageSummary.medium },
+                  { level: 'LOW', count: triageSummary.low },
+                ].map(s => {
+                  const tc = TRIAGE_COLORS[s.level] ?? TRIAGE_COLORS.MEDIUM;
+                  return (
+                    <div key={s.level} className="p-3 rounded-xl" style={{ backgroundColor: tc.bg, border: `1px solid ${tc.color}20` }}>
+                      <span className="text-2xl font-bold" style={{ color: tc.color }}>{s.count}</span>
+                      <p className="text-[10px] font-medium mt-0.5" style={{ color: tc.color }}>{s.level}</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 필터 */}
+              <div className="flex gap-2 mb-4">
+                {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(f => {
+                  const active = triageFilter === f;
+                  const tc = TRIAGE_COLORS[f] ?? { color: '#94a3b8', bg: 'rgba(148,163,184,0.15)' };
+                  return (
+                    <button key={f} onClick={() => setTriageFilter(f)} className={`text-xs font-medium px-3 py-1 rounded-lg transition-all ${active ? '' : 'opacity-60 hover:opacity-100'}`} style={{ color: active ? tc.color : '#94a3b8', backgroundColor: active ? tc.bg : 'transparent' }}>
+                      {f}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* 이벤트 리스트 */}
+              <div className="space-y-2">
+                {filteredTriaged.map((event) => {
+                  const tc = TRIAGE_COLORS[event.triageLevel] ?? TRIAGE_COLORS.MEDIUM;
+                  const st = SOURCE_TIER_LABELS[event.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY;
+                  const eventCase = getCaseForEvent(event.id);
+                  return (
+                    <div
+                      key={event.id}
+                      onClick={() => { setSelectedTriageEvent(event); setShowFullView(false); }}
+                      className="p-4 bg-slate-900/60 border border-white/5 rounded-xl hover:border-purple-500/30 cursor-pointer transition-all flex items-start gap-3"
+                    >
+                      <div className="flex flex-col items-center justify-center w-12 h-12 rounded-lg flex-shrink-0" style={{ backgroundColor: tc.bg, border: `1px solid ${tc.color}30` }}>
+                        <span className="text-lg font-bold leading-none" style={{ color: tc.color }}>{Math.round(event.triageScore)}</span>
+                        <span className="text-[8px] font-medium mt-0.5" style={{ color: tc.color }}>{event.triageLevel}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: st.color, backgroundColor: st.color + '15' }}>{st.icon} {st.label}</span>
+                          {event.categoryName && <span className="text-[10px] text-slate-500 bg-slate-800/50 px-1.5 rounded">{event.categoryName}</span>}
+                          {event.hasConflict && <span className="text-[10px] text-amber-400">&#9888;</span>}
+                          {eventCase && (
+                            <span className="text-[10px] font-medium px-1.5 rounded" style={{ color: (CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN).color, backgroundColor: (CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN).color + '15' }}>
+                              Case: {(CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN).label}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-white font-medium">{event.title}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{event.summary}</p>
+                        <div className="flex items-center gap-4 mt-1.5 text-[10px] text-slate-500">
+                          <span>S:{event.score} U:{event.urgency} C:{event.confidence}</span>
+                          <span>{event.sourceName}</span>
+                          <span>{formatRelativeTime(event.publishedAt)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ============================================ */}
       {/* 3. 선택된 딜 카테고리 히트맵 (하단) */}
@@ -624,18 +1192,20 @@ export default function CommandCenter() {
                 const trendArrow = getTrendArrow(cat.trend);
                 const trendClass = getTrendTextClass(cat.trend);
 
+                const isExpanded = expandedCategory === cat.code;
                 return (
                   <motion.div
                     key={cat.id}
-                    whileHover={!isDim ? { scale: 1.03 } : undefined}
+                    whileHover={!isDim ? { scale: 1.02 } : undefined}
                     className={isDim ? 'opacity-30' : 'cursor-pointer'}
                     onClick={() => !isDim && handleCategoryClick(cat.code)}
+                    layout
                   >
                     <GlassCard
                       className="p-3"
                       hover={!isDim}
                       style={{
-                        borderColor: isDim ? undefined : catColor.color + '30',
+                        borderColor: isExpanded ? catColor.color + '60' : isDim ? undefined : catColor.color + '30',
                       }}
                     >
                       {/* 상단: 아이콘 + 이름 */}
@@ -682,6 +1252,27 @@ export default function CommandCenter() {
                           Event: {cat.eventCount}
                         </span>
                       </div>
+
+                      {/* 확장 상세 (인라인) */}
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="mt-2 pt-2 border-t border-white/10"
+                        >
+                          <div className="text-[10px] text-slate-400 space-y-1 mb-2">
+                            <p>가중점수: <span className="text-white">{cat.weightedScore?.toFixed(1) ?? '-'}</span></p>
+                            <p>기여도: <span className="text-white">{selectedCompany ? `${((cat.weightedScore ?? 0) / Math.max(selectedCompany.directScore, 1) * 100).toFixed(0)}%` : '-'}</span></p>
+                          </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCategoryDeepDive(cat.code); }}
+                            className="w-full text-[10px] font-medium py-1 rounded text-purple-400 hover:text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors"
+                          >
+                            상세 분석 →
+                          </button>
+                        </motion.div>
+                      )}
                     </GlassCard>
                   </motion.div>
                 );

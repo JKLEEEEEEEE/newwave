@@ -6,10 +6,14 @@ Risk Engine V4 API
 
 from __future__ import annotations
 import logging
-from datetime import datetime
+import sqlite3
+import os
+import uuid
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from .schemas import (
     DealDetailResponse, DealDetail, CategorySummary, EventSummary, PersonSummary,
@@ -47,8 +51,8 @@ def get_client():
 # =============================================================================
 
 @router.get("/deals")
-async def get_deals():
-    """딜 목록 조회 (카테고리 요약 포함)"""
+def get_deals():
+    """딜 목록 조회 (카테고리 요약 포함) - def로 스레드풀 실행"""
     client = get_client()
 
     query = """
@@ -87,8 +91,8 @@ async def get_deals():
 
 
 @router.get("/deals/{deal_id}", response_model=DealDetailResponse)
-async def get_deal_detail(deal_id: str):
-    """딜 상세 조회 (전체 드릴다운 데이터)"""
+def get_deal_detail(deal_id: str):
+    """딜 상세 조회 (전체 드릴다운 데이터) - def로 스레드풀 실행 (이벤트루프 블로킹 방지)"""
     client = get_client()
 
     # 기본 정보 조회
@@ -226,7 +230,7 @@ async def get_deal_categories(deal_id: str):
 
 
 @router.get("/deals/{deal_id}/categories/{category_code}", response_model=CategoryDetailResponse)
-async def get_category_detail(deal_id: str, category_code: str):
+def get_category_detail(deal_id: str, category_code: str):
     """카테고리 상세 조회"""
     client = get_client()
     category_service = CategoryService(client)
@@ -805,7 +809,7 @@ async def get_deal_graph(deal_id: str):
 # =============================================================================
 
 @router.get("/deals/{deal_id}/drivers")
-async def get_risk_drivers(deal_id: str):
+def get_risk_drivers(deal_id: str):
     """리스크 기여도 Top Drivers 반환"""
     client = get_client()
 
@@ -885,7 +889,7 @@ async def get_risk_drivers(deal_id: str):
 
 
 @router.get("/deals/{deal_id}/briefing")
-async def get_deal_briefing(deal_id: str):
+def get_deal_briefing(deal_id: str):
     """딜 대상 AI 브리핑 생성"""
     client = get_client()
 
@@ -990,3 +994,336 @@ async def get_deal_briefing(deal_id: str):
             "categoryCount": len(categories),
         },
     }
+
+
+# =============================================================================
+# Triaged Events API (Smart Triage + Source Transparency)
+# =============================================================================
+
+# 소스 → 등급/신뢰도 매핑
+SOURCE_TIER_MAP = {
+    # OFFICIAL (공공기관)
+    "DART": ("OFFICIAL", 0.95),
+    "금감원": ("OFFICIAL", 0.95),
+    "FSS": ("OFFICIAL", 0.95),
+    "한국거래소": ("OFFICIAL", 0.90),
+    "공정위": ("OFFICIAL", 0.90),
+    # PRESS (주요 언론)
+    "연합뉴스": ("PRESS", 0.85),
+    "조선일보": ("PRESS", 0.80),
+    "중앙일보": ("PRESS", 0.80),
+    "동아일보": ("PRESS", 0.80),
+    "한겨레": ("PRESS", 0.80),
+    "경향신문": ("PRESS", 0.80),
+    "매일경제": ("PRESS", 0.82),
+    "한국경제": ("PRESS", 0.82),
+    "서울경제": ("PRESS", 0.80),
+    "머니투데이": ("PRESS", 0.78),
+    "이데일리": ("PRESS", 0.78),
+    "아시아경제": ("PRESS", 0.78),
+    "SBS": ("PRESS", 0.85),
+    "KBS": ("PRESS", 0.85),
+    "MBC": ("PRESS", 0.85),
+    "JTBC": ("PRESS", 0.85),
+    "YTN": ("PRESS", 0.82),
+    "뉴스1": ("PRESS", 0.75),
+    "뉴시스": ("PRESS", 0.75),
+    # COMMUNITY
+    "네이버": ("COMMUNITY", 0.60),
+    "다음": ("COMMUNITY", 0.55),
+}
+
+SEVERITY_SCORE_MAP = {
+    "CRITICAL": 100, "HIGH": 75, "MEDIUM": 50, "LOW": 25
+}
+
+# 카테고리별 대응 플레이북
+PLAYBOOK_MAP = {
+    "LEGAL": ["법률팀 검토 요청", "소송 리스크 분석 실행", "규제 영향 평가"],
+    "EXEC": ["경영진 배경 조사", "내부 이해관계 확인", "거버넌스 리뷰"],
+    "SHARE": ["지분 변동 모니터링", "주주총회 안건 확인", "공시 추적"],
+    "CREDIT": ["재무제표 분석", "신용등급 변동 추적", "유동성 점검"],
+    "GOV": ["지배구조 평가", "이사회 구성 점검", "내부통제 확인"],
+    "OPS": ["운영 리스크 평가", "공급망 안정성 확인", "BCP 점검"],
+    "AUDIT": ["감사보고서 검토", "내부감사 결과 확인", "회계 이슈 추적"],
+    "ESG": ["ESG 등급 확인", "환경 규제 점검", "사회적 영향 평가"],
+    "SUPPLY": ["공급망 의존도 분석", "대체 공급원 확인", "물류 리스크 점검"],
+    "OTHER": ["종합 리스크 평가", "추가 조사 필요"],
+}
+
+
+def _classify_source(source_name: str) -> tuple:
+    """소스명 → (tier, reliability) 분류"""
+    if not source_name:
+        return ("COMMUNITY", 0.50)
+    for key, (tier, rel) in SOURCE_TIER_MAP.items():
+        if key in source_name:
+            return (tier, rel)
+    # 블로그 패턴 감지
+    if "blog" in source_name.lower() or "블로그" in source_name:
+        return ("BLOG", 0.40)
+    return ("COMMUNITY", 0.55)
+
+
+def _calc_urgency(published_at: str) -> int:
+    """발행일 기반 긴급도 계산 (0-100, 시간 감쇠)"""
+    try:
+        pub = datetime.fromisoformat(published_at.replace("Z", "+00:00")) if published_at else None
+        if not pub:
+            return 30
+        now = datetime.now(pub.tzinfo) if pub.tzinfo else datetime.now()
+        hours_ago = max(0, (now - pub).total_seconds() / 3600)
+        # 0시간=100, 6시간=85, 24시간=60, 72시간=30, 168시간(7일)=10
+        if hours_ago <= 6:
+            return max(80, 100 - int(hours_ago * 3))
+        elif hours_ago <= 24:
+            return max(55, 85 - int((hours_ago - 6) * 1.4))
+        elif hours_ago <= 72:
+            return max(25, 60 - int((hours_ago - 24) * 0.7))
+        elif hours_ago <= 168:
+            return max(5, 30 - int((hours_ago - 72) * 0.26))
+        return 5
+    except Exception:
+        return 30
+
+
+def _calc_triage_level(score: float) -> str:
+    """트리아지 점수 → 레벨"""
+    if score >= 75:
+        return "CRITICAL"
+    if score >= 55:
+        return "HIGH"
+    if score >= 35:
+        return "MEDIUM"
+    return "LOW"
+
+
+@router.get("/deals/{deal_id}/events/triaged")
+def get_triaged_events(deal_id: str, limit: int = 30):
+    """Smart Triage 이벤트 목록 (3축 점수: Severity + Urgency + Confidence) - def로 스레드풀 실행"""
+    client = get_client()
+
+    # 모든 이벤트 가져오기
+    events_query = """
+    MATCH (c:Company {name: $dealId})-[:HAS_CATEGORY]->(rc:RiskCategory)
+          -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+    RETURN ev.id AS id, ev.title AS title, ev.summary AS summary,
+           ev.type AS type, ev.score AS score, ev.severity AS severity,
+           ev.source AS sourceName, ev.url AS sourceUrl,
+           coalesce(toString(ev.publishedAt), toString(ev.createdAt), '') AS publishedAt,
+           rc.code AS categoryCode, rc.name AS categoryName,
+           re.name AS entityName
+    ORDER BY ev.score DESC
+    LIMIT $limit
+    """
+    events_raw = client.execute_read(events_query, {"dealId": deal_id, "limit": limit}) or []
+
+    # 트리아지 점수 계산
+    triaged = []
+    title_set = {}  # 충돌 감지용
+
+    for e in events_raw:
+        title = e.get("title", "")
+        severity_str = e.get("severity") or "MEDIUM"
+        source_name = e.get("sourceName") or ""
+        published_at = e.get("publishedAt") or ""
+        cat_code = e.get("categoryCode") or "OTHER"
+
+        # 3축 계산
+        severity_score = SEVERITY_SCORE_MAP.get(severity_str, 50)
+        urgency = _calc_urgency(published_at)
+        tier, reliability = _classify_source(source_name)
+        confidence = int(reliability * 100)
+
+        # 트리아지 점수
+        triage_score = round(severity_score * 0.4 + urgency * 0.3 + confidence * 0.3, 1)
+        triage_level = _calc_triage_level(triage_score)
+
+        # 충돌 감지 (동일 주제 다른 소스)
+        title_key = title[:20] if title else ""
+        if title_key in title_set and title_set[title_key] != source_name:
+            has_conflict = True
+        else:
+            has_conflict = False
+        title_set[title_key] = source_name
+
+        # 플레이북
+        playbook = PLAYBOOK_MAP.get(cat_code, PLAYBOOK_MAP["OTHER"])
+
+        triaged.append({
+            "id": e.get("id", ""),
+            "entityId": e.get("entityName", ""),
+            "title": title,
+            "summary": e.get("summary") or "",
+            "type": e.get("type") or "NEWS",
+            "score": e.get("score", 0) or 0,
+            "severity": severity_str,
+            "sourceName": source_name,
+            "sourceUrl": e.get("sourceUrl") or "",
+            "publishedAt": published_at,
+            "urgency": urgency,
+            "confidence": confidence,
+            "triageScore": triage_score,
+            "triageLevel": triage_level,
+            "sourceTier": tier,
+            "sourceReliability": reliability,
+            "hasConflict": has_conflict,
+            "playbook": playbook,
+            "categoryCode": cat_code,
+            "categoryName": e.get("categoryName") or "",
+        })
+
+    # 트리아지 점수 기준 정렬
+    triaged.sort(key=lambda x: x["triageScore"], reverse=True)
+
+    return {
+        "schemaVersion": "v4",
+        "generatedAt": datetime.now().isoformat(),
+        "events": triaged,
+        "summary": {
+            "total": len(triaged),
+            "critical": sum(1 for t in triaged if t["triageLevel"] == "CRITICAL"),
+            "high": sum(1 for t in triaged if t["triageLevel"] == "HIGH"),
+            "medium": sum(1 for t in triaged if t["triageLevel"] == "MEDIUM"),
+            "low": sum(1 for t in triaged if t["triageLevel"] == "LOW"),
+        }
+    }
+
+
+# =============================================================================
+# Case Management API (SQLite 기반)
+# =============================================================================
+
+CASES_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "cases.db")
+
+
+def _init_cases_db():
+    """케이스 DB 초기화"""
+    os.makedirs(os.path.dirname(CASES_DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(CASES_DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cases (
+            id TEXT PRIMARY KEY,
+            deal_id TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            event_title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            assignee TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            priority TEXT NOT NULL DEFAULT 'MEDIUM',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+# 앱 시작 시 DB 초기화
+_init_cases_db()
+
+
+class CreateCaseRequest(BaseModel):
+    event_id: str
+    event_title: str
+    assignee: str = ""
+    notes: str = ""
+    priority: str = "MEDIUM"
+
+
+class UpdateCaseRequest(BaseModel):
+    status: Optional[str] = None
+    assignee: Optional[str] = None
+    notes: Optional[str] = None
+    priority: Optional[str] = None
+
+
+@router.get("/deals/{deal_id}/cases")
+def get_deal_cases(deal_id: str):
+    """딜의 케이스 목록 조회"""
+    conn = sqlite3.connect(CASES_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM cases WHERE deal_id = ? ORDER BY created_at DESC", (deal_id,)
+    ).fetchall()
+    conn.close()
+
+    cases = [dict(r) for r in rows]
+    return {
+        "cases": cases,
+        "summary": {
+            "total": len(cases),
+            "open": sum(1 for c in cases if c["status"] == "OPEN"),
+            "inProgress": sum(1 for c in cases if c["status"] == "IN_PROGRESS"),
+            "resolved": sum(1 for c in cases if c["status"] == "RESOLVED"),
+        }
+    }
+
+
+@router.post("/deals/{deal_id}/cases")
+def create_case(deal_id: str, req: CreateCaseRequest):
+    """새 케이스 생성"""
+    case_id = str(uuid.uuid4())[:8]
+    now = datetime.now().isoformat()
+
+    conn = sqlite3.connect(CASES_DB_PATH)
+    conn.execute(
+        """INSERT INTO cases (id, deal_id, event_id, event_title, status, assignee, notes, priority, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?)""",
+        (case_id, deal_id, req.event_id, req.event_title, req.assignee, req.notes, req.priority, now, now)
+    )
+    conn.commit()
+    conn.close()
+
+    return {
+        "id": case_id,
+        "deal_id": deal_id,
+        "event_id": req.event_id,
+        "event_title": req.event_title,
+        "status": "OPEN",
+        "assignee": req.assignee,
+        "notes": req.notes,
+        "priority": req.priority,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+@router.patch("/deals/{deal_id}/cases/{case_id}")
+def update_case(deal_id: str, case_id: str, req: UpdateCaseRequest):
+    """케이스 상태 업데이트"""
+    conn = sqlite3.connect(CASES_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    existing = conn.execute("SELECT * FROM cases WHERE id = ? AND deal_id = ?", (case_id, deal_id)).fetchone()
+    if not existing:
+        conn.close()
+        raise HTTPException(status_code=404, detail=f"Case not found: {case_id}")
+
+    updates = []
+    params = []
+    now = datetime.now().isoformat()
+
+    if req.status is not None:
+        updates.append("status = ?")
+        params.append(req.status)
+    if req.assignee is not None:
+        updates.append("assignee = ?")
+        params.append(req.assignee)
+    if req.notes is not None:
+        updates.append("notes = ?")
+        params.append(req.notes)
+    if req.priority is not None:
+        updates.append("priority = ?")
+        params.append(req.priority)
+
+    updates.append("updated_at = ?")
+    params.append(now)
+    params.extend([case_id, deal_id])
+
+    conn.execute(f"UPDATE cases SET {', '.join(updates)} WHERE id = ? AND deal_id = ?", params)
+    conn.commit()
+
+    updated = conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+    conn.close()
+
+    return dict(updated)

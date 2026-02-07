@@ -234,7 +234,10 @@ export function RiskV2Provider({
 
   /** 딜 목록 로드 */
   const loadDeals = useCallback(async () => {
-    dispatch({ type: 'SET_DEALS_LOADING', payload: true });
+    // 초기 로딩만 스켈레톤 표시 — 리프레시 시 기존 데이터 유지
+    if (state.deals.length === 0) {
+      dispatch({ type: 'SET_DEALS_LOADING', payload: true });
+    }
     try {
       const response = await riskApiV2.fetchDeals();
       if (response.success && response.data) {
@@ -252,7 +255,7 @@ export function RiskV2Provider({
       console.error('[RiskV2] 딜 로드 에러:', err);
       dispatch({ type: 'SET_DEALS_LOADING', payload: false });
     }
-  }, [state.selectedDealId]);
+  }, [state.selectedDealId, state.deals.length]);
 
   /** 딜 상세 데이터 로드 */
   const loadDealDetail = useCallback(async (dealId: string) => {

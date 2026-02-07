@@ -46,6 +46,12 @@ NEWS_SOURCES = {
         "suffix": "+site:naver.com",
         "reliability": 0.85,
     },
+    "NAVER_BLOG_RSS": {
+        "name": "네이버블로그",
+        "url": "https://rss.blog.naver.com/cmylose0102.xml",
+        "reliability": 0.40,
+        "tier": "BLOG",
+    },
 }
 
 # 수집 필터 설정
@@ -66,7 +72,7 @@ MAJOR_PUBLISHERS = [
 # 요청 간격 (초)
 REQUEST_DELAY = 0.3
 
-SourceType = Literal["GOOGLE_RSS", "GOOGLE_RSS_NAVER"]
+SourceType = Literal["GOOGLE_RSS", "GOOGLE_RSS_NAVER", "NAVER_BLOG_RSS"]
 
 
 # =============================================================================
