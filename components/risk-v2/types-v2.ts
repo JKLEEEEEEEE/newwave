@@ -407,14 +407,6 @@ export interface RiskDriversResponse {
   allDrivers: RiskDriver[];
 }
 
-/** What-if 시나리오 프리셋 */
-export interface WhatIfScenario {
-  id: string;
-  name: string;
-  icon: string;
-  impacts: Partial<Record<CategoryCodeV2, number>>;
-}
-
 // ============================================
 // Live Events Triage 타입
 // ============================================

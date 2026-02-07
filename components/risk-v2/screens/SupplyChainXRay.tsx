@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import SpriteText from 'three-spritetext';
 
 // 타입
-import type { GraphNode3D, GraphLink3D, CompanyV2, RiskCategoryV2, RiskDriver, CategoryCodeV2, WhatIfScenario } from '../types-v2';
+import type { GraphNode3D, GraphLink3D, CompanyV2, RiskCategoryV2, RiskDriver, CategoryCodeV2 } from '../types-v2';
 
 // 디자인 토큰
 import { GRADIENTS } from '../design-tokens';
@@ -104,17 +104,6 @@ function getLinkCascadeStep(relationship: string): number {
 // 사이드 패널 너비 상수
 // ============================================
 const SIDE_PANEL_WIDTH = 280;
-
-// ============================================
-// What-if 시나리오 프리셋 (5개)
-// ============================================
-const WHATIF_SCENARIOS: WhatIfScenario[] = [
-  { id: 'legal_crisis', name: '법률 위기', icon: '\u2696\uFE0F', impacts: { LEGAL: 50, GOV: 20 } },
-  { id: 'supply_disruption', name: '공급망 단절', icon: '\uD83D\uDEA2', impacts: { SUPPLY: 60, OPS: 30 } },
-  { id: 'credit_downgrade', name: '신용 하락', icon: '\uD83D\uDCC9', impacts: { CREDIT: 40, SHARE: 15 } },
-  { id: 'exec_scandal', name: '경영진 스캔들', icon: '\uD83D\uDC64', impacts: { EXEC: 50, GOV: 30, ESG: 20 } },
-  { id: 'esg_violation', name: 'ESG 위반', icon: '\uD83C\uDF0D', impacts: { ESG: 50, LEGAL: 15 } },
-];
 
 // ============================================
 // Step 7: 캐스케이드 모드 타입
@@ -224,16 +213,6 @@ export default function SupplyChainXRay() {
   // --- Top Drivers ---
   const [topDrivers, setTopDrivers] = useState<RiskDriver[]>([]);
   const [driversLoading, setDriversLoading] = useState(false);
-
-  // --- What-if Simulation ---
-  const [whatIfScenario, setWhatIfScenario] = useState<string>('');
-  const [whatIfResult, setWhatIfResult] = useState<{
-    beforeScore: number;
-    afterScore: number;
-    delta: number;
-    affectedCategories: { code: string; name: string; before: number; after: number }[];
-  } | null>(null);
-  const [whatIfActive, setWhatIfActive] = useState(false);
 
   // ============================================
   // Step 7: 캐스케이드 시뮬레이션 상태 + 로직
@@ -387,60 +366,6 @@ export default function SupplyChainXRay() {
       setTopDrivers([]);
     }
   }, [selectedNode?.id]);
-
-  // --- What-if 시뮬레이션 실행 (클라이언트 사이드) ---
-  const runWhatIf = useCallback((scenarioId: string) => {
-    const scenario = WHATIF_SCENARIOS.find(s => s.id === scenarioId);
-    if (!scenario || !filteredGraphData.nodes.length) return;
-
-    // 현재 카테고리 노드에서 점수 추출
-    const mainCompanyNode = filteredGraphData.nodes.find(n => n.nodeType === 'mainCompany');
-    if (!mainCompanyNode) return;
-    const mainId = mainCompanyNode.id;
-
-    const categoryNodes = filteredGraphData.nodes.filter(
-      n => n.nodeType === 'riskCategory' && n.id.startsWith(`RC_${mainId}_`)
-    );
-
-    let newDirectScore = 0;
-    const affected: { code: string; name: string; before: number; after: number }[] = [];
-
-    for (const cat of categoryNodes) {
-      const code = cat.categoryCode || cat.id.split('_').pop() || '';
-      const currentScore = cat.riskScore || 0;
-      const weight = (cat.metadata?.weight as number) || 0;
-      const impact = scenario.impacts[code as CategoryCodeV2] || 0;
-      const newScore = currentScore + impact;
-      const newWeighted = newScore * weight;
-      newDirectScore += newWeighted;
-
-      if (impact > 0) {
-        affected.push({ code, name: cat.name, before: currentScore, after: newScore });
-      }
-    }
-
-    // 전이 점수 (기존 유지)
-    const propScore = mainCompanyNode.metadata?.directScore
-      ? (mainCompanyNode.riskScore - (mainCompanyNode.metadata.directScore as number))
-      : 0;
-    const afterTotal = Math.round(newDirectScore + Math.max(0, propScore));
-    const beforeTotal = mainCompanyNode.riskScore;
-
-    setWhatIfResult({
-      beforeScore: beforeTotal,
-      afterScore: afterTotal,
-      delta: afterTotal - beforeTotal,
-      affectedCategories: affected,
-    });
-    setWhatIfActive(true);
-  }, [filteredGraphData]);
-
-  // What-if 초기화
-  const resetWhatIf = useCallback(() => {
-    setWhatIfScenario('');
-    setWhatIfResult(null);
-    setWhatIfActive(false);
-  }, []);
 
   // --- 노드 라벨 콜백 (U2: 리치 HTML 툴팁) ---
   const nodeLabelFn = useCallback((node: FGNode) => {
@@ -860,104 +785,6 @@ export default function SupplyChainXRay() {
             </div>
           )}
 
-          {/* ============================================ */}
-          {/* What-if Simulation */}
-          {/* ============================================ */}
-          {filteredGraphData.nodes.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-xs text-slate-500 font-semibold mb-2 uppercase tracking-wider">
-                What-if Simulation
-              </h3>
-              <div className="p-3 rounded-xl bg-slate-800/40 border border-white/5 space-y-3">
-                {/* 시나리오 선택 */}
-                <select
-                  className="w-full bg-slate-900/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500/50"
-                  value={whatIfScenario}
-                  onChange={(e) => setWhatIfScenario(e.target.value)}
-                >
-                  <option value="" className="bg-slate-900">-- 시나리오 선택 --</option>
-                  {WHATIF_SCENARIOS.map(s => (
-                    <option key={s.id} value={s.id} className="bg-slate-900">
-                      {s.icon} {s.name}
-                    </option>
-                  ))}
-                </select>
-
-                {/* 실행/초기화 버튼 */}
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => whatIfScenario && runWhatIf(whatIfScenario)}
-                    disabled={!whatIfScenario}
-                    className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border ${
-                      whatIfScenario
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 hover:bg-amber-500/30'
-                        : 'bg-slate-800/30 text-slate-600 border-white/5 cursor-not-allowed'
-                    }`}
-                  >
-                    &#9889; 실행
-                  </button>
-                  {whatIfActive && (
-                    <button
-                      onClick={resetWhatIf}
-                      className="px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors border border-white/5"
-                    >
-                      &#10005;
-                    </button>
-                  )}
-                </div>
-
-                {/* 결과 카드 */}
-                {whatIfResult && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="p-3 rounded-xl bg-slate-900/60 border border-amber-500/20 space-y-3"
-                  >
-                    {/* Before / After */}
-                    <div className="flex items-center justify-between">
-                      <div className="text-center">
-                        <p className="text-[10px] text-slate-500 mb-0.5">Before</p>
-                        <p className="text-lg font-bold text-white">{whatIfResult.beforeScore}</p>
-                      </div>
-                      <div className="text-center px-3">
-                        <span className="text-xl text-slate-500">&#8594;</span>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-[10px] text-slate-500 mb-0.5">After</p>
-                        <p className={`text-lg font-bold ${whatIfResult.afterScore >= 50 ? 'text-red-400' : whatIfResult.afterScore >= 30 ? 'text-yellow-400' : 'text-green-400'}`}>
-                          {whatIfResult.afterScore}
-                        </p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-[10px] text-slate-500 mb-0.5">Delta</p>
-                        <p className={`text-lg font-bold ${whatIfResult.delta > 0 ? 'text-red-400' : 'text-green-400'}`}>
-                          {whatIfResult.delta > 0 ? '+' : ''}{whatIfResult.delta}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* 영향 카테고리 */}
-                    {whatIfResult.affectedCategories.length > 0 && (
-                      <div className="space-y-1.5">
-                        <p className="text-[10px] text-slate-500">영향 카테고리</p>
-                        {whatIfResult.affectedCategories.map((ac, i) => (
-                          <div key={i} className="flex items-center justify-between text-xs">
-                            <span className="text-slate-300">{ac.name}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-slate-500">{ac.before}</span>
-                              <span className="text-slate-600">&#8594;</span>
-                              <span className="text-red-400 font-medium">{ac.after}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </motion.div>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* 관련기업 리스트 */}
           {relatedCompanies.length > 0 && (
             <div className="mb-4">
@@ -1138,7 +965,7 @@ export default function SupplyChainXRay() {
           exit={{ opacity: 0, x: 30 }}
           transition={{ duration: 0.3 }}
         >
-          <GlassCard className="p-4 max-h-[60vh] overflow-y-auto">
+          <GlassCard className="p-4 max-h-[85vh] overflow-y-auto">
             {/* Close button */}
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-white font-bold text-sm">{selectedNode.name}</h3>
@@ -1429,8 +1256,9 @@ export default function SupplyChainXRay() {
       )}
 
       {/* ============================================ */}
-      {/* Step 16: 우측 하단 인포 패널 (filteredGraphData 카운트) */}
+      {/* Step 16: 우측 하단 인포 패널 (노드 상세 열릴 때 숨김) */}
       {/* ============================================ */}
+      {!selectedNode && (
       <motion.div
         className="absolute right-4 bottom-4 z-20 pointer-events-auto"
         style={{ width: '300px' }}
@@ -1480,6 +1308,7 @@ export default function SupplyChainXRay() {
           </div>
         </GlassCard>
       </motion.div>
+      )}
     </div>
   );
 }
