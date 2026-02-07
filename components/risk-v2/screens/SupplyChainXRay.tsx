@@ -492,11 +492,11 @@ export default function SupplyChainXRay() {
   }, []);
 
   return (
-    <div className="relative w-full h-full overflow-hidden" style={{ background: 'rgba(10, 15, 30, 1)' }}>
+    <div className="relative w-full h-full" style={{ background: 'rgba(10, 15, 30, 1)' }}>
       {/* ============================================ */}
       {/* 1. 3D 그래프 (전체 배경) */}
       {/* ============================================ */}
-      <div className="absolute inset-0">
+      <div className="absolute inset-0 z-0 overflow-hidden">
         {/* U7: 로딩 스피너 */}
         {graphLoading && selectedDealId && (
           <div className="absolute inset-0 flex items-center justify-center z-[5]">
@@ -576,7 +576,7 @@ export default function SupplyChainXRay() {
       {/* Step 14: 상단 뱃지 (activeFlowCount) */}
       {/* ============================================ */}
       <motion.div
-        className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10"
+        className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 pointer-events-auto"
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
@@ -1155,7 +1155,7 @@ export default function SupplyChainXRay() {
       {/* Step 16: 우측 하단 인포 패널 (filteredGraphData 카운트) */}
       {/* ============================================ */}
       <motion.div
-        className="absolute right-4 bottom-4 z-10"
+        className="absolute right-4 bottom-4 z-20 pointer-events-auto"
         style={{ width: '300px' }}
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
