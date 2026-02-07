@@ -180,24 +180,28 @@ const getAnalysisData = (caseId: string, allDeals: DealSummary[]): VerificationD
   };
 };
 
-const mergeApiData = (
-  baseData: VerificationData,
-  apiResult: APIScoringResult | null
-): VerificationData => {
+const mergeApiData = (baseData: VerificationData, apiResult: APIScoringResult | null): VerificationData => {
   if (!apiResult) return baseData;
 
-  const { run, results = [], deal_terms } = apiResult;
+  const { run, results } = apiResult;
 
-  // Module mapping
-  const moduleMap = new Map<string, any[]>();
+  // 1. Module Mapping
+  // Group results by module
+  const moduleMap = new Map<string, typeof results>();
   results.forEach(r => {
+    // Map module_name to id or use logic. 
+    // Since we don't have exact ID mapping from DB to frontend static IDs, we'll try to map by name or order.
+    // For now, let's look at the module_name string.
+    // Frontend IDs: m1, m2, m3, m4, m5, m6
+    // Database Modules: Cash Flow, Fundamentals, Soft Data, Sponsor, Structure, Target
+
     let mId = 'm1';
-    if (r.module_name?.includes('Cash')) mId = 'm1';
-    else if (r.module_name?.includes('Fundamental')) mId = 'm2';
-    else if (r.module_name?.includes('Soft')) mId = 'm3';
-    else if (r.module_name?.includes('Sponsor')) mId = 'm4';
-    else if (r.module_name?.includes('Structure')) mId = 'm5';
-    else if (r.module_name?.includes('Target')) mId = 'm6';
+    if (r.module_name.includes('Cash')) mId = 'm1';
+    else if (r.module_name.includes('Basic') || r.module_name.includes('Fundamental')) mId = 'm2';
+    else if (r.module_name.includes('Soft') || r.module_name.includes('HR')) mId = 'm3';
+    else if (r.module_name.includes('Sponsor') || r.module_name.includes('GP')) mId = 'm4';
+    else if (r.module_name.includes('Structure') || r.module_name.includes('Deal')) mId = 'm5';
+    else if (r.module_name.includes('Target') || r.module_name.includes('Market')) mId = 'm6';
 
     const list = moduleMap.get(mId) || [];
     list.push(r);
@@ -208,50 +212,33 @@ const mergeApiData = (
     const apiItems = moduleMap.get(mod.id);
     if (!apiItems) return mod;
 
-    const totalScore =
-      apiItems.reduce((acc, r) => acc + (r.score_raw || 0), 0) /
-      (apiItems.length || 1);
+    // Calculate new total score for module
+    const totalScore = apiItems.reduce((acc, cur) => acc + (cur.score_raw || 0), 0) / (apiItems.length || 1);
 
     return {
       ...mod,
-      totalScore,
-      details: apiItems.map(i => ({
-        category: 'AI Analysis',
-        item: i.item_name,
-        score: i.score_raw,
-        value: i.extracted_value,
-        weight: 15
+      totalScore: totalScore,
+      details: apiItems.map(item => ({
+        category: 'AI Analysis', // mapping category is hard without DB field, using placeholder
+        item: item.item_name,
+        score: item.score_raw,
+        value: item.extracted_value,
+        weight: 15 // Placeholder
       }))
     };
   });
 
   return {
     ...baseData,
-
-    dealInfo: deal_terms
-      ? {
-        ...baseData.dealInfo,
-        borrower: deal_terms.BORROWER?.extracted_value || baseData.dealInfo.borrower,
-        sponsor: deal_terms.SPONSOR?.extracted_value || baseData.dealInfo.sponsor,
-        dealSize: deal_terms.DEALSIZE?.extracted_value || baseData.dealInfo.dealSize,
-        equity: deal_terms.TARGET_EQUITY?.extracted_value || baseData.dealInfo.equity,
-        projectName: deal_terms.PROJECT_NAME?.extracted_value || baseData.dealInfo.target,
-        projectInfo: deal_terms.PROJECT_INFO?.extracted_value || '프로젝트 설명 없음'
-      }
-      : baseData.dealInfo,
-
     modules: newModules,
-
     verdict: {
       ...baseData.verdict,
-      totalScore:
-        run?.total_score > 0
-          ? run.total_score
-          : newModules.reduce((acc, m) => acc + m.totalScore, 0),
-      description:
-        run?.project_summary?.industry_overview_highlights?.[0] ||
-        baseData.verdict.description
-    }
+      totalScore: run.total_score,
+      description: run.project_summary.industry_overview_highlights[0] || baseData.verdict.description
+    },
+    // We can also pass the summary to be used in DocumentViewer if we prop drill different data, 
+    // but VerificationData might not have a field for it. 
+    // We will attach it loosely or extend type if needed. For now, let's stick to replacing existing fields.
   };
 };
 
@@ -262,8 +249,6 @@ const App: React.FC = () => {
   const [leftWidth, setLeftWidth] = useState(42);
   const [isResizing, setIsResizing] = useState(false);
   const [activeRefPage, setActiveRefPage] = useState<number | null>(null);
-
-  const [pendingDeal, setPendingDeal] = useState<DealSummary | null>(null);
 
   // New States for IM Analysis
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -314,58 +299,14 @@ const App: React.FC = () => {
     };
   }, [onResize, stopResizing]);
 
-  // Combine deals + pendingDeal for Analysis View so we can see the new deal before approval
-  const effectiveDeals = useMemo(() => {
-    if (pendingDeal && selectedDealId === pendingDeal.id) {
-      return [pendingDeal, ...deals];
-    }
-    return deals;
-  }, [deals, pendingDeal, selectedDealId]);
-
   const analysisData = useMemo(() => {
-    const base = getAnalysisData(selectedDealId, effectiveDeals);
+    const base = getAnalysisData(selectedDealId, deals);
     return mergeApiData(base, apiResult);
-  }, [selectedDealId, effectiveDeals, apiResult]);
-
-  const handleApprove = () => {
-    if (pendingDeal && selectedDealId === pendingDeal.id) {
-      // Recalculate based on Analysis Data to ensure exact match with AnalysisPanel UI
-      const confirmedDeal = { ...pendingDeal };
-
-      const calculatedTotal = analysisData.modules.reduce((acc, m) => acc + m.details.reduce((s, d) => s + d.score, 0), 0);
-      const calculatedMax = analysisData.modules.reduce((acc, m) => acc + m.details.length * 5, 0);
-
-      confirmedDeal.totalScore = calculatedTotal;
-      confirmedDeal.maxScore = calculatedMax;
-
-      // Commit pending deal to main list
-      setDeals(prev => [confirmedDeal, ...prev]);
-      setPendingDeal(null);
-      // Optional: Navigate to Global Dashboard to show it's added
-      setViewMode('global');
-    }
-  };
+  }, [selectedDealId, apiResult]);
 
   // Pass summary specifically to DocumentViewer if possible
   // We'll trust analysisData to carry enough info or modify DocumentViewer props
   const projectSummary = apiResult?.run.project_summary;
-
-  const customDocContent = useMemo(() => {
-    if (!apiResult?.deal_terms) return undefined;
-    const { deal_terms, run } = apiResult;
-    return {
-      title: deal_terms.PROJECT_NAME?.extracted_value || run.file_name,
-      subtitle: deal_terms.PROJECT_INFO?.extracted_value || '투자 설명서(IM) 분석',
-      sector: 'General (IB)',
-      context: run.project_summary?.industry_overview_highlights?.[0] || '산업 개요 분석 중...',
-      highlight: run.project_summary?.deal_structure_financing_plan?.[0] || '구조 분석 중...',
-      dealSize: deal_terms.DEALSIZE?.extracted_value || '-',
-      equity: deal_terms.TARGET_EQUITY?.extracted_value || '-',
-      debt: '-',
-      leverage: '-',
-      risk: run.project_summary?.risk_factors_mitigation?.[0] || '리스크 분석 중...'
-    };
-  }, [apiResult]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-50 font-['Pretendard']">
@@ -381,17 +322,11 @@ const App: React.FC = () => {
                 activePage={activeRefPage}
                 onUploadClick={() => setIsUploadModalOpen(true)}
                 aiSummary={projectSummary}
-                customContent={selectedDealId.startsWith('case_new') ? customDocContent : undefined}
               />
             </div>
             <div className="w-1 cursor-col-resize resizable-handle z-10 bg-slate-200 hover:bg-[#003366] transition-colors" onMouseDown={startResizing} />
             <div style={{ width: `${100 - leftWidth}%` }} className="h-full overflow-hidden bg-white">
-              <AnalysisPanel
-                data={analysisData}
-                onHurdleClick={(p) => setActiveRefPage(p)}
-                activeHurdlePage={activeRefPage}
-                onApprove={handleApprove}
-              />
+              <AnalysisPanel data={analysisData} onHurdleClick={(p) => setActiveRefPage(p)} activeHurdlePage={activeRefPage} />
             </div>
           </main>
         )}
@@ -430,65 +365,22 @@ const App: React.FC = () => {
           fetch(`http://localhost:3001/api/im/run/${runId}`)
             .then(res => res.json())
             .then((data: APIScoringResult) => {
-              const dataAny = data as any; // Cast to access new llm_result field
-              const llm = dataAny.llm_result;
-              const terms = llm?.deal_terms || data.deal_terms; // Prefer LLM raw
-
-              // Helper to find extracted value by item name (flexible search fallback)
-              const findValue = (keywords: string[]) => {
-                const found = data.results.find(r => keywords.some(k => r.item_name.toLowerCase().includes(k.toLowerCase())));
-                return found ? found.extracted_value : null;
-              };
-
-              // 1. Extract Deal Size (Main Metric)
-              const dealSize = terms?.DEALSIZE?.extracted_value
-                || findValue(['Deal Size', 'Transaction Size', '거래 규모', '전체 금액', 'Equity Value', 'Enterprise Value'])
-                || 'TBD';
-
-              // 2. Extract Target Name (Title)
-              const targetName = terms?.BORROWER?.extracted_value
-                || findValue(['Target', 'Target Name', '대상 회사', '대상기업', '피인수기업', 'Company Name'])
-                || data.run.file_name.replace('.pdf', '');
-
-              // 3. Extract Sponsor
-              const sponsorName = terms?.SPONSOR?.extracted_value
-                || 'Midas Private Equity';
-
-              // 4. Extract Credits/Signals
-              const dscr = findValue(['DSCR']);
-              const credit = findValue(['신용등급', 'Credit Rating']);
-
-              // 5. Calculate Scores (Use LLM Source if available)
-              let validTotalScore = 0;
-              let maxScore = 165;
-
-              if (llm && llm.items && llm.items.length > 0) {
-                validTotalScore = llm.run_summary?.total_score || 0;
-                maxScore = llm.items.length * 5;
-              } else {
-                // Fallback if no LLM blob (e.g. legacy data)
-                validTotalScore = data.run.total_score > 0
-                  ? data.run.total_score
-                  : data.results.reduce((acc, r) => acc + (Number(r.score_raw) || 0), 0);
-                maxScore = Math.max(data.results.length * 5, 165);
-              }
-
               // Create new deal object
               const newDeal: DealSummary = {
                 id: `case_new_${runId}`,
-                name: terms?.PROJECT_NAME?.extracted_value || terms?.BORROWER?.extracted_value || targetName,
-                sector: 'IB',
-                sponsor: terms?.SPONSOR?.extracted_value || sponsorName,
-                status: (validTotalScore / maxScore) * 100 > 60 ? HurdleStatus.PASS : HurdleStatus.WARNING,
+                name: data.run.file_name.replace('.pdf', ''), // Simple name derivation
+                sector: 'IB', // Default or extract if possible
+                sponsor: 'Unknown',
+                status: HurdleStatus.WARNING, // Default
                 progress: '검토',
-                mainMetric: { label: 'Deal Size', value: dealSize },
-                lastSignal: credit ? `Credit: ${credit}` : (dscr ? `DSCR: ${dscr}` : 'AI 분석 완료'),
+                mainMetric: { label: 'Total Score', value: `${data.run.total_score}pt` },
+                lastSignal: 'AI 분석 완료',
                 lastUpdated: '방금 전',
-                totalScore: validTotalScore,
-                maxScore: maxScore
+                totalScore: data.run.total_score,
+                maxScore: 165 // Standard template max score
               };
 
-              setPendingDeal(newDeal);
+              setDeals(prev => [newDeal, ...prev]);
               setSelectedDealId(newDeal.id);
               setViewMode('analysis');
             })

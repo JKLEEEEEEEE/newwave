@@ -6,10 +6,9 @@ interface Props {
   data: VerificationData;
   onHurdleClick: (page: number) => void;
   activeHurdlePage: number | null;
-  onApprove?: () => void;
 }
 
-const AnalysisPanel: React.FC<Props> = ({ data, onHurdleClick, activeHurdlePage, onApprove }) => {
+const AnalysisPanel: React.FC<Props> = ({ data }) => {
   const { dealInfo, modules, verdict } = data;
   const [activeModule, setActiveModule] = useState<string>(modules[0].id);
 
@@ -79,13 +78,7 @@ const AnalysisPanel: React.FC<Props> = ({ data, onHurdleClick, activeHurdlePage,
                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
                 <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em]">Institutional Intelligence Report</span>
               </div>
-              <h2 className="text-4xl font-black text-[#003366] tracking-tighter leading-tight">
-                {dealInfo.projectName || "투자 자산 정밀 채점표"}
-                <br />
-                <span className="text-slate-400 text-xl mt-2 block font-bold">
-                  {dealInfo.projectInfo || "Enterprise Due Diligence"}
-                </span>
-              </h2>
+              <h2 className="text-4xl font-black text-[#003366] tracking-tighter leading-tight">투자 자산 정밀 채점표<br /><span className="text-slate-400">Enterprise Due Diligence</span></h2>
             </div>
             <div className="text-right">
               <span className="px-3 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[10px] font-black uppercase block mb-3">SECRET / STRICTLY CONFIDENTIAL</span>
@@ -216,10 +209,7 @@ const AnalysisPanel: React.FC<Props> = ({ data, onHurdleClick, activeHurdlePage,
               </p>
             </div>
             <div className="grid grid-cols-2 gap-8 pt-6">
-              <button
-                onClick={onApprove}
-                className="py-5 bg-[#003366] text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl hover:scale-[1.03] transition-all active:scale-100"
-              >
+              <button className="py-5 bg-[#003366] text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl hover:scale-[1.03] transition-all active:scale-100">
                 최종 심사 승인 상신 (Group Approval)
               </button>
             </div>
