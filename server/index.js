@@ -91,8 +91,7 @@ app.post('/api/im/upload', upload.single('file'), async (req, res) => {
         const model = genAI.getGenerativeModel({ model: modelName });
         const prompt = `
 당신은 숙련된 투자심사역(Investment Analyst)입니다.
-아래에 제공된 투자설명서(IM, Investment Memorandum) 텍스트를 분석하여,
-주어진 평가 항목(scoring items)에 따라 정량·정성 평가를 수행하세요.
+아래에 제공된 투자설명서(IM, Investment Memorandum) 텍스트를 분석하여, 주어진 평가 항목(scoring items)에 따라 정량·정성 평가를 수행하세요.
 
 ⚠️ 매우 중요:
 - 모든 서술, 요약, 코멘트, 설명은 **반드시 한국어로만 작성**하세요.
@@ -106,6 +105,22 @@ ${scoringPrompt}
 
 ---
 
+[추가로 반드시 추출해야 하는 Deal Terms — 누락 금지]
+아래 5개 항목을 IM 본문에서 “정확히” 찾아서 출력하세요.
+- PROJECT_NAME: 첫장 제목에 명시된 Project명 문장 그대로
+- BORROWER: 차주(또는 SPC) 법인명
+- SPONSOR: Sponsor/투자자/PE 운용사 명칭
+- DEALSIZE: 본건 인수금융/리파이낸싱 총 조달금액(통화/단위 포함)
+- TARGET_EQUITY: 대상회사(또는 담보 지분)의 자기자본가치/지분가치/Equity Value
+  - 문서에 여러 값(예: Min/Avg/Max, DCF/Trading/Transaction 등)이 있으면
+    1) “대표값(가능하면 Average 또는 문서가 ‘평균’이라 명시한 값)”을 extracted_value에 넣고,
+    2) evidence_text에 근거 문장(표/문장)을 그대로 인용하며,
+    3) notes에 “어떤 기준(DCF/Trading/Transaction 등)에서 어떤 값들을 봤는지” 요약하세요.
+  - IM에 TARGET_EQUITY가 명확히 없으면 extracted_value는 "N/A"로, notes에 "IM 내 명시값 없음"을 쓰고,
+    evidence_text는 "N/A"로 두세요. (절대 임의 추정 금지)
+
+---
+
 [분석 작업 지시]
 1. IM 본문에서 각 평가 항목(item_key)에 해당하는 **구체적인 수치, 문장, 근거**를 추출하세요.
 2. 추출한 근거를 바탕으로 각 항목에 대해 **1~5점 수준의 score_raw**를 부여하세요.
@@ -116,6 +131,7 @@ ${scoringPrompt}
    - Risk (주요 리스크 및 완화 요인)
 5. evidence_text는 반드시 문자열(string) 1개여야 하며, 근거가 여러 개면
    " / " 로 한 문장에 합치며 배열로 만들면 안됨
+
 ---
 
 [분석 대상 IM 텍스트]
@@ -135,6 +151,40 @@ ${extractedText.substring(0, 30000)}
     "overall_comment": "본 투자건에 대한 종합적인 한국어 평가 요약",
     "total_score": 0
   },
+
+  "deal_terms": {
+    "PROJECT_INFO": {
+      "extracted_value": "프로젝트 설명",
+      "evidence_text": "IM 원문에서 프로젝트 설명 너가 한줄로 간단히 요약",
+      "notes": "투자 설명서(IM)의 Deal개요를 간략하게 한 줄 요약 (한국어)"
+    },
+    "PROJECT_NAME": {
+      "extracted_value": "프로젝트명",
+      "evidence_text": "첫장 제목에 명시된 Project명 문장 그대로 ",
+      "notes": "투자 설명서(IM)의 전체 내용을 간략하게 한 줄 요약 (한국어)"
+    },
+    "BORROWER": {
+      "extracted_value": "차주(또는 SPC) 법인명",
+      "evidence_text": "IM 원문에서 차주/차주 혹은 SPC를 명시한 문장 그대로, 괄호()안의 내용은 제외",
+      "notes": "어떤 문맥에서 차주로 정의되었는지 간단 설명 (한국어)"
+    },
+    "SPONSOR": {
+      "extracted_value": "Sponsor/투자자 명칭",
+      "evidence_text": "IM 원문에서 Sponsor/투자자를 명시한 문장 그대로",
+      "notes": "Sponsor의 역할(예: 인수 주체/PE 등) 간단 설명 (한국어)"
+    },
+    "DEALSIZE": {
+      "extracted_value": "총 조달금액(단위 포함, 예: 6,850억원)",
+      "evidence_text": "IM 원문에서 총 금액을 명시한 문장 그대로",
+      "notes": "Tr.A/Tr.B 등 구성 요약 (한국어)"
+    },
+    "TARGET_EQUITY": {
+      "extracted_value": "대상회사/담보 지분의 Equity Value 대표값 (없으면 N/A)",
+      "evidence_text": "IM 원문에서 Equity Value/지분가치/자기자본가치를 명시한 문장 또는 표 설명 그대로 (없으면 N/A)",
+      "notes": "평가 방법(DCF/Trading/Transaction 등)과 대표값 선택 근거 요약. 없으면 'IM 내 명시값 없음' (한국어)"
+    }
+  },
+
   "items": [
     {
       "item_key": "DB에 존재하는 item_key와 정확히 일치",
@@ -145,6 +195,7 @@ ${extractedText.substring(0, 30000)}
       "notes": "점수 산정 사유 및 투자 관점에서의 해석 (한국어)"
     }
   ],
+
   "project_golden_summary": {
     "industry_overview_highlights": [
       "산업의 성장성, 시장 규모, 구조적 트렌드 요약"
@@ -159,6 +210,7 @@ ${extractedText.substring(0, 30000)}
 }
 `;
 
+
         const result = await model.generateContent({
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: { responseMimeType: "application/json" }
@@ -169,9 +221,9 @@ ${extractedText.substring(0, 30000)}
 
         text = sanitizeJsonText(text);
 
-        let jsonResponse;
         try {
             jsonResponse = JSON.parse(text);
+            console.log("Analyzed JSON:", JSON.stringify(jsonResponse, null, 2)); // Log for user visibility
         } catch (e) {
             console.error("Failed to parse Gemini JSON", text);
             return res.status(500).json({ error: "LLM Response invalid JSON", raw: text });
@@ -180,7 +232,14 @@ ${extractedText.substring(0, 30000)}
         // 4. Save to DB
         db.serialize(() => {
             const stmtRun = db.prepare("INSERT INTO scoring_runs (file_name, status, llm_model, total_score, project_summary_json) VALUES (?, ?, ?, ?, ?)");
-            stmtRun.run(originalName, 'completed', 'gemini-pro', jsonResponse.run_summary.total_score, JSON.stringify(jsonResponse.project_golden_summary), function (err) {
+
+            // Store both project_summary and deal_terms in the JSON column to avoid schema change
+            const combinedData = {
+                project_golden_summary: jsonResponse.project_golden_summary,
+                deal_terms: jsonResponse.deal_terms
+            };
+
+            stmtRun.run(originalName, 'completed', 'gemini-pro', jsonResponse.run_summary.total_score, JSON.stringify(combinedData), function (err) {
                 if (err) {
                     console.error("DB Insert Run Error", err);
                     return; // TODO: handle error
@@ -227,12 +286,19 @@ app.get('/api/im/run/:id', (req, res) => {
         `, [runId], (err, results) => {
             if (err) return res.status(500).json({ error: err.message });
 
+            const savedJson = JSON.parse(run.project_summary_json || '{}');
+
+            // Handle backward compatibility (if savedJson is just the summary array/object vs the new combined object)
+            const projectSummary = savedJson.project_golden_summary || savedJson;
+            const dealTerms = savedJson.deal_terms || null;
+
             res.json({
                 run: {
                     ...run,
-                    project_summary: JSON.parse(run.project_summary_json || '{}')
+                    project_summary: projectSummary
                 },
-                results
+                results,
+                deal_terms: dealTerms
             });
         });
     });

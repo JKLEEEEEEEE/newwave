@@ -106,7 +106,7 @@ const GlobalDashboard: React.FC<Props> = ({ deals, onDealClick, onAddClick }) =>
                   <p className="text-2xl font-black text-[#003366] tracking-tighter drop-shadow-sm">
                     {deal.totalScore}
                     <span className="text-[14px] text-slate-400/80 ml-1.5 font-bold tracking-tight">
-                      / {deal.maxScore || 165}
+                      / {deal.maxScore}
                     </span>
                   </p>
                 </div>
