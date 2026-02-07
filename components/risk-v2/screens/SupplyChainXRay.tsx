@@ -12,6 +12,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import ForceGraph3D from 'react-force-graph-3d';
 import { motion } from 'framer-motion';
+// Step 1: THREE + SpriteText imports
+import * as THREE from 'three';
+import SpriteText from 'three-spritetext';
 
 // 타입
 import type { GraphNode3D, GraphLink3D, CompanyV2, RiskCategoryV2 } from '../types-v2';
@@ -53,15 +56,49 @@ interface FGLink {
 }
 
 // ============================================
-// 노드 타입별 범례 데이터
+// Step 2: NODE_LEGEND 교체 (Deal 제거, 프리미엄 색상)
 // ============================================
 const NODE_LEGEND = [
-  { type: 'deal', label: 'Deal (투자검토)', color: '#6366f1', tier: 'Tier 0', shape: 'circle-lg' },
-  { type: 'mainCompany', label: 'Main Company', color: '#f59e0b', tier: 'Tier 1', shape: 'circle-md' },
-  { type: 'relatedCompany', label: 'Related Company', color: '#8b5cf6', tier: 'Tier 1-2', shape: 'circle-sm' },
-  { type: 'riskCategory', label: 'Risk Category', color: '#14b8a6', tier: 'Tier 2', shape: 'diamond' },
-  { type: 'riskEntity', label: 'Risk Entity', color: '#6b7280', tier: 'Tier 3', shape: 'dot' },
+  { type: 'mainCompany', label: 'Main Company', color: '#E2A855', tier: 'Tier 1', shape: 'circle-md' },
+  { type: 'relatedCompany', label: 'Related Company', color: '#9B8AE8', tier: 'Tier 1-2', shape: 'circle-sm' },
+  { type: 'riskCategory', label: 'Risk Category', color: '#4ECDC4', tier: 'Tier 2', shape: 'diamond' },
+  { type: 'riskEntity', label: 'Risk Entity', color: '#8296AA', tier: 'Tier 3', shape: 'dot' },
 ];
+
+// Step 2: 헬퍼 함수 - 노드 타입별 색상
+function getNodeTypeColor(nodeType: string): string {
+  switch (nodeType) {
+    case 'mainCompany': return '#E2A855';
+    case 'relatedCompany': return '#9B8AE8';
+    case 'riskCategory': return '#4ECDC4';
+    case 'riskEntity': return '#8296AA';
+    default: return '#8296AA';
+  }
+}
+
+// Step 2: 헬퍼 함수 - 링크 타입별 색상
+function getLinkTypeColor(relationship: string): string {
+  switch (relationship) {
+    case 'TARGET': return '#A8B8CC';
+    case 'HAS_CATEGORY': return '#3BB5A8';
+    case 'HAS_ENTITY': return '#7E72C0';
+    case 'HAS_RELATED': return '#C9963A';
+    default: return '#A8B8CC';
+  }
+}
+
+// ============================================
+// 링크 cascade step 매핑
+// ============================================
+function getLinkCascadeStep(relationship: string): number {
+  switch (relationship) {
+    case 'TARGET': return 0;
+    case 'HAS_CATEGORY': return 1;
+    case 'HAS_ENTITY': return 2;
+    case 'HAS_RELATED': return 3;
+    default: return 4;
+  }
+}
 
 // ============================================
 // 사이드 패널 너비 상수
@@ -69,11 +106,19 @@ const NODE_LEGEND = [
 const SIDE_PANEL_WIDTH = 280;
 
 // ============================================
+// Step 7: 캐스케이드 모드 타입
+// ============================================
+type CascadeMode = 'idle' | 'manual' | 'auto';
+
+// ============================================
 // 메인 컴포넌트
 // ============================================
 export default function SupplyChainXRay() {
   const { state, selectDeal, selectCompany, selectCategory, setActiveView, currentDeal, currentCompany, currentCategories, currentRelatedCompanies } = useRiskV2();
   const { selectedDealId, deals, dealDetail } = state;
+
+  // --- ForceGraph3D ref ---
+  const fgRef = useRef<any>(null);
 
   // --- 윈도우 크기 추적 ---
   const [dimensions, setDimensions] = useState({
@@ -129,10 +174,24 @@ export default function SupplyChainXRay() {
   const mainCompany = currentCompany;
   const relatedCompanies = currentRelatedCompanies;
 
-  // --- 파티클 카운트 ---
-  const particleCount = useMemo(() => {
-    return graphData.links.filter(l => l.riskTransfer > 0).length * 3;
+  // ============================================
+  // Step 5: filteredGraphData (U5: Deal 숨김)
+  // ============================================
+  const filteredGraphData = useMemo(() => {
+    const nodes = graphData.nodes.filter(n => n.nodeType !== 'deal');
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const links = graphData.links.filter(l => {
+      const sId = typeof l.source === 'string' ? l.source : (l.source as string);
+      const tId = typeof l.target === 'string' ? l.target : (l.target as string);
+      return nodeIds.has(sId) && nodeIds.has(tId);
+    });
+    return { nodes, links };
   }, [graphData]);
+
+  // ============================================
+  // Step 6: activeFlowCount (particleCount 대체)
+  // ============================================
+  const activeFlowCount = useMemo(() => filteredGraphData.links.filter(l => l.riskTransfer > 0).length, [filteredGraphData]);
 
   // --- 선택된 노드 (NodeDetailPanel) ---
   const [selectedNode, setSelectedNode] = useState<GraphNode3D | null>(null);
@@ -144,6 +203,115 @@ export default function SupplyChainXRay() {
 
   // --- 선택된 링크 ---
   const [selectedLink, setSelectedLink] = useState<GraphLink3D | null>(null);
+
+  // ============================================
+  // Step 7: 캐스케이드 시뮬레이션 상태 + 로직
+  // ============================================
+  const [cascadeMode, setCascadeMode] = useState<CascadeMode>('idle');
+  const [cascadeStep, setCascadeStep] = useState(-1);
+  const cascadeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const cascadeActive = cascadeMode !== 'idle';
+
+  const stopCascade = useCallback(() => {
+    setCascadeMode('idle');
+    setCascadeStep(-1);
+    if (cascadeIntervalRef.current) {
+      clearInterval(cascadeIntervalRef.current);
+      cascadeIntervalRef.current = null;
+    }
+  }, []);
+
+  const startAutoPlay = useCallback(() => {
+    stopCascade();
+    setCascadeMode('auto');
+    setCascadeStep(0);
+    cascadeIntervalRef.current = setInterval(() => {
+      setCascadeStep(prev => {
+        if (prev >= 3) {
+          // 한 바퀴 완료 후 정지
+          if (cascadeIntervalRef.current) {
+            clearInterval(cascadeIntervalRef.current);
+            cascadeIntervalRef.current = null;
+          }
+          setCascadeMode('idle');
+          return -1;
+        }
+        return prev + 1;
+      });
+    }, 2000);
+  }, [stopCascade]);
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (cascadeIntervalRef.current) {
+        clearInterval(cascadeIntervalRef.current);
+      }
+    };
+  }, []);
+
+
+  // ============================================
+  // Step 8: 캐스케이드 노드 시각 효과 (useEffect로 scene traverse)
+  // ============================================
+  useEffect(() => {
+    if (!fgRef.current) return;
+    const scene = fgRef.current.scene?.();
+    if (!scene) return;
+
+    scene.traverse((obj: any) => {
+      if (!obj.userData?.nodeType) return;
+      const nodeTier = obj.userData.nodeTier as number;
+      const nodeColor = obj.userData.nodeColor as string;
+
+      if (cascadeActive && cascadeStep >= 0) {
+        const isCurrent = nodeTier === cascadeStep;
+        const isActive = nodeTier <= cascadeStep;
+
+        obj.children?.forEach((child: any) => {
+          if (!child.material) return;
+
+          if (child.userData?.role === 'mainSphere' || child.userData?.role === 'halo') {
+            if (isCurrent) {
+              if (child.material.emissive) child.material.emissive.set('#fef08a');
+              if (child.material.emissiveIntensity !== undefined) child.material.emissiveIntensity = 0.6;
+              child.material.opacity = 1.0;
+              obj.scale.setScalar(1.3);
+            } else if (isActive) {
+              if (child.material.emissive) child.material.emissive.set('#000000');
+              if (child.material.emissiveIntensity !== undefined) child.material.emissiveIntensity = 0;
+              child.material.opacity = 0.9;
+              obj.scale.setScalar(1.0);
+            } else {
+              if (child.material.emissive) child.material.emissive.set('#0a0f1e');
+              if (child.material.emissiveIntensity !== undefined) child.material.emissiveIntensity = 0;
+              child.material.opacity = 0.15;
+              obj.scale.setScalar(0.8);
+            }
+          }
+
+          if (child.userData?.role === 'pulseRing') {
+            child.visible = isCurrent;
+          }
+        });
+      } else {
+        // Reset to default state
+        obj.scale.setScalar(1.0);
+        obj.children?.forEach((child: any) => {
+          if (!child.material) return;
+          if (child.userData?.role === 'mainSphere' || child.userData?.role === 'halo') {
+            if (child.material.emissive) child.material.emissive.set('#000000');
+            if (child.material.emissiveIntensity !== undefined) child.material.emissiveIntensity = 0;
+            child.material.opacity = child.userData?.role === 'halo' ? 0.15 : 0.9;
+          }
+          if (child.userData?.role === 'pulseRing') {
+            child.visible = false;
+          }
+        });
+      }
+    });
+  }, [cascadeActive, cascadeStep]);
 
   // --- 패널 바깥 클릭 시 닫기 ---
   useEffect(() => {
@@ -162,27 +330,6 @@ export default function SupplyChainXRay() {
   const handleNodeClick = useCallback((node: FGNode) => {
     setSelectedNode(prev => prev?.id === node.id ? null : node);
     setShowAllConnections(false);
-  }, []);
-
-  // --- 노드 색상 콜백 (U28: 선택 노드 하이라이트) ---
-  const nodeColorFn = useCallback((node: FGNode) => {
-    if (selectedNode?.id === node.id) return '#f0abfc'; // 선택된 노드 밝은 보라
-    if (highlightedCompanyId) {
-      // When a related company is highlighted, dim unrelated nodes
-      const isHighlighted = node.id === highlightedCompanyId
-        || graphData.links.some(l =>
-          (l.source === highlightedCompanyId && l.target === node.id) ||
-          (l.target === highlightedCompanyId && l.source === node.id)
-        );
-      if (!isHighlighted) return 'rgba(100, 116, 139, 0.2)'; // dimmed
-    }
-    if (node.nodeType === 'deal') return '#6366f1';
-    return getNode3DColor(node.riskLevel);
-  }, [selectedNode, highlightedCompanyId, graphData.links]);
-
-  // --- 노드 크기 콜백 ---
-  const nodeValFn = useCallback((node: FGNode) => {
-    return getNode3DSize(node.nodeType, node.riskScore);
   }, []);
 
   // --- 노드 라벨 콜백 (U2: 리치 HTML 툴팁) ---
@@ -212,25 +359,121 @@ export default function SupplyChainXRay() {
     return `${rawLink.label} (전이: ${rawLink.riskTransfer})`;
   }, []);
 
-  // --- 링크 파티클 수 ---
-  const linkParticlesFn = useCallback((link: FGLink) => {
-    const rawLink = link as unknown as GraphLink3D;
-    return rawLink.riskTransfer > 0 ? 3 : 0;
-  }, []);
-
-  // --- 링크 파티클 색상 ---
-  const linkParticleColorFn = useCallback((link: FGLink) => {
-    const rawLink = link as unknown as GraphLink3D;
-    return rawLink.riskTransfer > 20 ? '#ef4444' : '#8b5cf6';
-  }, []);
-
-  // --- 링크 색상 ---
-  const linkColorFn = useCallback(() => 'rgba(148, 163, 184, 0.15)', []);
-
   // --- 링크 클릭 핸들러 ---
   const handleLinkClick = useCallback((link: FGLink) => {
     const rawLink = link as unknown as GraphLink3D;
     setSelectedLink(prev => prev?.source === rawLink.source && prev?.target === rawLink.target ? null : rawLink);
+  }, []);
+
+  // ============================================
+  // Step 9: nodeThreeObjectFn (U1+U2+U3+U4 통합)
+  // ============================================
+  const nodeThreeObjectFn = useCallback((node: FGNode) => {
+    const group = new THREE.Group();
+    const color = getNodeTypeColor(node.nodeType);
+    const size = getNode3DSize(node.nodeType, node.riskScore) * 0.35;
+
+    // 노드 tier 매핑: mainCompany=0, relatedCompany=1, riskCategory=2, riskEntity=3
+    let nodeTier = 3;
+    if (node.nodeType === 'mainCompany') nodeTier = 0;
+    else if (node.nodeType === 'relatedCompany') nodeTier = 1;
+    else if (node.nodeType === 'riskCategory') nodeTier = 2;
+    else if (node.nodeType === 'riskEntity') nodeTier = 3;
+
+    // userData for cascade effect (Step 8)
+    group.userData = { nodeType: node.nodeType, nodeTier, nodeColor: color, nodeId: node.id };
+
+    // 메인 구체
+    const sphereGeo = new THREE.SphereGeometry(size, 32, 32);
+    const sphereMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color),
+      emissive: new THREE.Color('#000000'),
+      emissiveIntensity: 0,
+      roughness: 0.3,
+      metalness: 0.6,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+    sphere.userData = { role: 'mainSphere' };
+    group.add(sphere);
+
+    // 헤일로 (반투명 구체)
+    const haloGeo = new THREE.SphereGeometry(size * 1.4, 32, 32);
+    const haloMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color),
+      transparent: true,
+      opacity: 0.15,
+      roughness: 1,
+      metalness: 0,
+      depthWrite: false,
+    });
+    const halo = new THREE.Mesh(haloGeo, haloMat);
+    halo.userData = { role: 'halo' };
+    group.add(halo);
+
+    // 펄스링 (company 노드만)
+    if (node.nodeType === 'mainCompany' || node.nodeType === 'relatedCompany') {
+      const ringGeo = new THREE.RingGeometry(size * 1.6, size * 1.8, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(color),
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.userData = { role: 'pulseRing' };
+      ring.visible = false; // hidden by default, shown during cascade
+      group.add(ring);
+    }
+
+    // SpriteText 라벨 (U3: depthTest=false)
+    const label = new SpriteText(node.name, size * 0.6, '#e2e8f0');
+    (label as any).material.depthTest = false;
+    (label as any).position.set(0, size + 2.5, 0);
+    label.fontWeight = '600';
+    label.backgroundColor = 'rgba(15, 23, 42, 0.7)';
+    label.padding = 2;
+    label.borderRadius = 3;
+    group.add(label);
+
+    return group;
+  }, []);
+
+  // --- 링크 콜백 (cascade 연동) ---
+  const linkColorFn = useCallback((link: FGLink) => {
+    const rel = (link as any).relationship || 'TARGET';
+    if (cascadeActive && cascadeStep >= 0) {
+      const linkStep = getLinkCascadeStep(rel);
+      if (linkStep > cascadeStep) return 'rgba(100,116,139,0.08)'; // 비활성: 거의 안보임
+    }
+    return getLinkTypeColor(rel);
+  }, [cascadeActive, cascadeStep]);
+
+  const linkWidthFn = useCallback((link: FGLink) => {
+    if (cascadeActive && cascadeStep >= 0) {
+      const rel = (link as any).relationship || 'TARGET';
+      const linkStep = getLinkCascadeStep(rel);
+      if (linkStep > cascadeStep) return 0.2;
+      if (linkStep === cascadeStep) return 2;
+    }
+    return 1;
+  }, [cascadeActive, cascadeStep]);
+
+  const linkParticlesFn = useCallback((link: FGLink) => {
+    if (cascadeActive && cascadeStep >= 0) {
+      const rel = (link as any).relationship || 'TARGET';
+      const linkStep = getLinkCascadeStep(rel);
+      if (linkStep > cascadeStep) return 0; // 비활성 엣지는 파티클 없음
+    }
+    const rawLink = link as unknown as GraphLink3D;
+    return rawLink.riskTransfer > 0 ? 3 : 1;
+  }, [cascadeActive, cascadeStep]);
+
+  const linkParticleColorFn = useCallback((link: FGLink) => {
+    const rawLink = link as unknown as GraphLink3D;
+    return rawLink.riskTransfer > 20 ? '#ef4444' : rawLink.riskTransfer > 0 ? '#f59e0b' : '#6366f1';
   }, []);
 
   return (
@@ -248,24 +491,24 @@ export default function SupplyChainXRay() {
             </div>
           </div>
         )}
-        {selectedDealId && graphData.nodes.length > 0 && !graphLoading ? (
+        {/* Step 13: ForceGraph3D props 교체 */}
+        {selectedDealId && filteredGraphData.nodes.length > 0 && !graphLoading ? (
           <ForceGraph3D
-            graphData={graphData}
+            ref={fgRef}
+            graphData={filteredGraphData}
             width={dimensions.width - SIDE_PANEL_WIDTH}
             height={dimensions.height - 64}
             backgroundColor="rgba(10, 15, 30, 1)"
-            nodeColor={nodeColorFn as (node: object) => string}
-            nodeVal={nodeValFn as (node: object) => number}
+            nodeThreeObject={nodeThreeObjectFn as (node: object) => any}
             nodeLabel={nodeLabelFn as (node: object) => string}
-            nodeOpacity={0.9}
-            linkColor={linkColorFn}
-            linkWidth={1}
-            linkOpacity={0.4}
-            linkLabel={linkLabelFn as (link: object) => string}
+            linkColor={linkColorFn as (link: object) => string}
+            linkWidth={linkWidthFn as (link: object) => number}
+            linkOpacity={0.5}
             linkDirectionalParticles={linkParticlesFn as (link: object) => number}
             linkDirectionalParticleSpeed={0.005}
             linkDirectionalParticleWidth={2.5}
             linkDirectionalParticleColor={linkParticleColorFn as (link: object) => string}
+            linkLabel={linkLabelFn as (link: object) => string}
             onNodeClick={handleNodeClick as (node: object) => void}
             onLinkClick={handleLinkClick as (link: object) => void}
             enableNodeDrag={true}
@@ -315,7 +558,7 @@ export default function SupplyChainXRay() {
       </div>
 
       {/* ============================================ */}
-      {/* 4. 상단 뱃지 (절대 위치, 중앙) */}
+      {/* Step 14: 상단 뱃지 (activeFlowCount) */}
       {/* ============================================ */}
       <motion.div
         className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10"
@@ -326,11 +569,11 @@ export default function SupplyChainXRay() {
         <GlassCard className="px-4 py-2">
           <div className="flex items-center gap-3">
             <span className="text-purple-400 text-xs font-medium">Real-time Risk Propagation</span>
-            {particleCount > 0 && (
+            {activeFlowCount > 0 && (
               <>
                 <span className="text-slate-500 text-xs">|</span>
                 <span className="text-red-400 text-xs">
-                  &#9679; {particleCount} particles
+                  &#9679; {activeFlowCount} active flows
                 </span>
               </>
             )}
@@ -399,6 +642,93 @@ export default function SupplyChainXRay() {
             </div>
           )}
 
+          {/* ============================================ */}
+          {/* Step 15: 캐스케이드 시뮬레이션 UI */}
+          {/* ============================================ */}
+          {filteredGraphData.nodes.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-xs text-slate-500 font-semibold mb-2 uppercase tracking-wider">
+                Risk Cascade
+              </h3>
+              <div className="p-3 rounded-xl bg-slate-800/40 border border-white/5 space-y-3">
+                {/* Auto play / stop button */}
+                <button
+                  onClick={() => {
+                    if (cascadeMode === 'auto') {
+                      stopCascade();
+                    } else {
+                      startAutoPlay();
+                    }
+                  }}
+                  className={`w-full py-2 rounded-lg text-xs font-medium transition-colors border ${
+                    cascadeMode === 'auto'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 hover:bg-amber-500/30'
+                      : 'bg-purple-500/20 text-purple-300 border-purple-500/20 hover:bg-purple-500/30'
+                  }`}
+                >
+                  {cascadeMode === 'auto' ? '\u25FC 정지' : '\u26A1 리스크 전파 시뮬레이션'}
+                </button>
+
+                {/* 4 step buttons */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { step: 0, label: 'Main Company' },
+                    { step: 1, label: 'Supply Chain' },
+                    { step: 2, label: 'Risk Categories' },
+                    { step: 3, label: 'Risk Entities' },
+                  ].map(({ step, label }) => (
+                    <button
+                      key={step}
+                      onClick={() => {
+                        if (cascadeIntervalRef.current) {
+                          clearInterval(cascadeIntervalRef.current);
+                          cascadeIntervalRef.current = null;
+                        }
+                        setCascadeMode('manual');
+                        setCascadeStep(step);
+                      }}
+                      className={`py-1.5 px-2 rounded text-[10px] font-medium transition-all border ${
+                        cascadeActive && cascadeStep === step
+                          ? 'bg-yellow-400/20 text-yellow-300 border-yellow-400/40'
+                          : cascadeActive && cascadeStep > step
+                            ? 'bg-slate-700/40 text-slate-300 border-white/10'
+                            : 'bg-slate-800/30 text-slate-500 border-white/5 hover:border-white/15 hover:text-slate-400'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Progress bar (5 dots) */}
+                <div className="flex items-center justify-center gap-2">
+                  {[0, 1, 2, 3].map(i => (
+                    <div
+                      key={i}
+                      className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                        cascadeActive && cascadeStep >= i
+                          ? cascadeStep === i
+                            ? 'bg-yellow-400 scale-125 shadow-lg shadow-yellow-400/50'
+                            : 'bg-purple-400'
+                          : 'bg-slate-700'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                {/* Reset button when cascade is active */}
+                {cascadeActive && (
+                  <button
+                    onClick={stopCascade}
+                    className="w-full py-1.5 rounded text-[10px] text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-colors"
+                  >
+                    {'\u2715'} 초기화
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 관련기업 리스트 */}
           {relatedCompanies.length > 0 && (
             <div className="mb-4">
@@ -447,12 +777,6 @@ export default function SupplyChainXRay() {
               {NODE_LEGEND.map((item) => (
                 <div key={item.type} className="flex items-center gap-2">
                   {/* 모양 표현 */}
-                  {item.shape === 'circle-lg' && (
-                    <span
-                      className="w-3.5 h-3.5 rounded-full"
-                      style={{ backgroundColor: item.color }}
-                    />
-                  )}
                   {item.shape === 'circle-md' && (
                     <span
                       className="w-3 h-3 rounded-full"
@@ -580,13 +904,13 @@ export default function SupplyChainXRay() {
               </div>
             </div>
 
-            {/* Connected edges info */}
+            {/* Step 17: Connected edges info - use filteredGraphData */}
             <div className="mb-3">
               <h4 className="text-xs text-slate-500 font-semibold mb-2 uppercase tracking-wider">
                 Connections
               </h4>
               {(() => {
-                const allConnections = graphData.links
+                const allConnections = filteredGraphData.links
                   .filter(l => l.source === selectedNode.id || l.target === selectedNode.id);
                 const visibleConnections = showAllConnections ? allConnections : allConnections.slice(0, 5);
                 const hasMore = allConnections.length > 5;
@@ -596,7 +920,7 @@ export default function SupplyChainXRay() {
                       {visibleConnections.map((link, idx) => {
                         const isSource = link.source === selectedNode.id;
                         const otherNodeId = isSource ? link.target : link.source;
-                        const otherNode = graphData.nodes.find(n => n.id === otherNodeId);
+                        const otherNode = filteredGraphData.nodes.find(n => n.id === otherNodeId);
                         return (
                           <div key={idx} className="flex items-center gap-2 text-xs p-1.5 rounded bg-slate-800/30">
                             <span className="text-slate-500">{isSource ? '\u2192' : '\u2190'}</span>
@@ -727,7 +1051,7 @@ export default function SupplyChainXRay() {
       )}
 
       {/* ============================================ */}
-      {/* 3. 우측 하단 인포 패널 */}
+      {/* Step 16: 우측 하단 인포 패널 (filteredGraphData 카운트) */}
       {/* ============================================ */}
       <motion.div
         className="absolute right-4 bottom-4 z-10"
@@ -751,15 +1075,15 @@ export default function SupplyChainXRay() {
             </span>
           </div>
 
-          {/* 노드/엣지 카운트 */}
+          {/* 노드/엣지 카운트 - Step 16: filteredGraphData */}
           <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-slate-800/40">
             <div className="flex-1 text-center">
-              <p className="text-lg font-bold text-purple-400">{graphData.nodes.length}</p>
+              <p className="text-lg font-bold text-purple-400">{filteredGraphData.nodes.length}</p>
               <p className="text-[10px] text-slate-500">Nodes</p>
             </div>
             <div className="w-px h-8 bg-white/10" />
             <div className="flex-1 text-center">
-              <p className="text-lg font-bold text-cyan-400">{graphData.links.length}</p>
+              <p className="text-lg font-bold text-cyan-400">{filteredGraphData.links.length}</p>
               <p className="text-[10px] text-slate-500">Edges</p>
             </div>
           </div>
