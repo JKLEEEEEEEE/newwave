@@ -615,17 +615,19 @@ function CustomScenarioBuilder({
       </div>
 
       {/* 실행 버튼 */}
-      <button
-        onClick={handleRun}
-        disabled={!isValid}
-        className={`w-full py-3 rounded-xl font-semibold text-white transition-all ${
-          isValid
-            ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-lg shadow-purple-500/20'
-            : 'bg-white/5 text-slate-500 cursor-not-allowed'
-        }`}
-      >
-        커스텀 시뮬레이션 실행
-      </button>
+      <div className="flex justify-center mt-2">
+        <button
+          onClick={handleRun}
+          disabled={!isValid}
+          className={`px-10 py-3 rounded-xl font-bold text-white text-lg transition-all ${
+            isValid
+              ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-lg shadow-purple-500/20 hover:shadow-xl hover:shadow-purple-500/30'
+              : 'bg-white/5 text-slate-500 cursor-not-allowed'
+          }`}
+        >
+          커스텀 시뮬레이션 실행
+        </button>
+      </div>
       {!isValid && hasImpacts && multiplierError && (
         <p className="text-red-400/70 text-xs text-center mt-2">
           전파 배수 값을 올바르게 입력해 주세요
@@ -745,7 +747,7 @@ export default function WhatIf() {
           What-If 시뮬레이션
         </h2>
         <p className="text-slate-400 text-sm mt-1">
-          What-If 시나리오를 선택하고 실행하여 포트폴리오 영향을 분석합니다
+          시나리오를 선택하고 실행하여 포트폴리오 영향을 분석합니다.
         </p>
       </div>
 
