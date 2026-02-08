@@ -45,3 +45,10 @@ screenshots/
 scripts/*_debug*.json
 scripts/*_result*.json
 scripts/*_titles*.json
+
+# Server upload artifacts
+server/uploads/
+server/database.sqlite
+
+# External repo (temporary)
+external_repo/

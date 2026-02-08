@@ -63,6 +63,7 @@ export interface DealSummary {
   lastSignal: string;
   lastUpdated: string;
   totalScore?: number;
+  maxScore?: number;
 }
 
 export interface GlobalAlert {
@@ -89,6 +90,8 @@ export interface VerificationData {
     sponsor: string;
     borrower: string;
     target: string;
+    projectName?: string;
+    projectInfo?: string;
     dealSize: string;
     equity: string;
     debt: string;
@@ -108,4 +111,34 @@ export interface MonitoringData {
   status: HurdleStatus;
   nodes: DealNode[];
   edges: DealEdge[];
+}
+
+export interface APIScoringResult {
+  run: {
+    id: number;
+    file_name: string;
+    total_score: number;
+    project_summary: {
+      industry_overview_highlights: string[];
+      deal_structure_financing_plan: string[];
+      risk_factors_mitigation: string[];
+    };
+  };
+  results: {
+    item_key: string;
+    item_name: string;
+    extracted_value: string;
+    score_raw: number;
+    evidence_text: string;
+    module_id: number;
+    module_name: string;
+  }[];
+  deal_terms?: {
+    PROJECT_NAME: { extracted_value: string; evidence_text: string; notes?: string };
+    PROJECT_INFO: { extracted_value: string; evidence_text: string; notes?: string };
+    BORROWER: { extracted_value: string; evidence_text: string; notes?: string };
+    SPONSOR: { extracted_value: string; evidence_text: string; notes?: string };
+    DEALSIZE: { extracted_value: string; evidence_text: string; notes?: string };
+    TARGET_EQUITY: { extracted_value: string; evidence_text: string; notes?: string };
+  };
 }
