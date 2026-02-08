@@ -1054,56 +1054,87 @@ export default function CommandCenter() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-lg overflow-y-auto"
+            className="fixed inset-0 z-50 flex items-center justify-center p-6"
+            onClick={() => setShowFullView(false)}
           >
-            <div className="max-w-4xl mx-auto p-8">
-              {/* 헤더 */}
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-white">All Triaged Events</h2>
-                  <p className="text-sm text-slate-400 mt-1">{triagedEvents.length} events for {selectedDealId}</p>
+            {/* 배경 오버레이 */}
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+
+            {/* 모달 본체 */}
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 24 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 24 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-5xl max-h-[85vh] flex flex-col
+                         bg-slate-900/95 backdrop-blur-xl
+                         border border-white/10 rounded-2xl shadow-2xl shadow-black/40
+                         overflow-hidden"
+            >
+              {/* 상단 그라데이션 스트라이프 */}
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 via-blue-500 to-cyan-500 rounded-t-2xl" />
+
+              {/* 헤더 (sticky) */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 flex-shrink-0">
+                <div className="flex items-center gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Live Events — All Triaged</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">{triagedEvents.length}건 | {selectedDealId}</p>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setShowFullView(false)}
-                  className="text-slate-400 hover:text-white text-2xl transition-colors px-3 py-1"
-                >
-                  &#10005;
-                </button>
+                <div className="flex items-center gap-3">
+                  {/* 통계 뱃지 (인라인) */}
+                  {[
+                    { level: 'CRITICAL', count: triageSummary.critical },
+                    { level: 'HIGH', count: triageSummary.high },
+                    { level: 'MEDIUM', count: triageSummary.medium },
+                    { level: 'LOW', count: triageSummary.low },
+                  ].map(s => {
+                    const tc = TRIAGE_COLORS[s.level] ?? TRIAGE_COLORS.MEDIUM;
+                    return (
+                      <div key={s.level} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ backgroundColor: tc.bg, border: `1px solid ${tc.color}20` }}>
+                        <span className="text-sm font-bold" style={{ color: tc.color }}>{s.count}</span>
+                        <span className="text-[9px] font-medium" style={{ color: tc.color }}>{s.level}</span>
+                      </div>
+                    );
+                  })}
+                  <button
+                    onClick={() => setShowFullView(false)}
+                    className="ml-2 w-8 h-8 flex items-center justify-center rounded-lg
+                               text-slate-400 hover:text-white hover:bg-white/10 transition-all"
+                  >
+                    &#10005;
+                  </button>
+                </div>
               </div>
 
-              {/* 통계 바 */}
-              <div className="grid grid-cols-4 gap-3 mb-6">
-                {[
-                  { level: 'CRITICAL', count: triageSummary.critical },
-                  { level: 'HIGH', count: triageSummary.high },
-                  { level: 'MEDIUM', count: triageSummary.medium },
-                  { level: 'LOW', count: triageSummary.low },
-                ].map(s => {
-                  const tc = TRIAGE_COLORS[s.level] ?? TRIAGE_COLORS.MEDIUM;
-                  return (
-                    <div key={s.level} className="p-3 rounded-xl" style={{ backgroundColor: tc.bg, border: `1px solid ${tc.color}20` }}>
-                      <span className="text-2xl font-bold" style={{ color: tc.color }}>{s.count}</span>
-                      <p className="text-[10px] font-medium mt-0.5" style={{ color: tc.color }}>{s.level}</p>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* 필터 */}
-              <div className="flex gap-2 mb-4">
+              {/* 필터 탭 */}
+              <div className="flex items-center gap-1.5 px-6 py-3 border-b border-white/5 flex-shrink-0">
                 {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(f => {
                   const active = triageFilter === f;
                   const tc = TRIAGE_COLORS[f] ?? { color: '#94a3b8', bg: 'rgba(148,163,184,0.15)' };
                   return (
-                    <button key={f} onClick={() => setTriageFilter(f)} className={`text-xs font-medium px-3 py-1 rounded-lg transition-all ${active ? '' : 'opacity-60 hover:opacity-100'}`} style={{ color: active ? tc.color : '#94a3b8', backgroundColor: active ? tc.bg : 'transparent' }}>
+                    <button
+                      key={f}
+                      onClick={() => setTriageFilter(f)}
+                      className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all
+                        ${active ? 'shadow-sm' : 'opacity-50 hover:opacity-100'}`}
+                      style={{
+                        color: active ? tc.color : '#94a3b8',
+                        backgroundColor: active ? tc.bg : 'transparent',
+                        border: active ? `1px solid ${tc.color}30` : '1px solid transparent',
+                      }}
+                    >
                       {f}
                     </button>
                   );
                 })}
+                <span className="ml-auto text-[10px] text-slate-500">{filteredTriaged.length}건 표시</span>
               </div>
 
-              {/* 이벤트 리스트 */}
-              <div className="space-y-2">
+              {/* 이벤트 리스트 (스크롤) */}
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
                 {filteredTriaged.map((event) => {
                   const tc = TRIAGE_COLORS[event.triageLevel] ?? TRIAGE_COLORS.MEDIUM;
                   const st = SOURCE_TIER_LABELS[event.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY;
@@ -1112,36 +1143,68 @@ export default function CommandCenter() {
                     <div
                       key={event.id}
                       onClick={() => { setSelectedTriageEvent(event); setShowFullView(false); }}
-                      className="p-4 bg-slate-900/60 border border-white/5 rounded-xl hover:border-purple-500/30 cursor-pointer transition-all flex items-start gap-3"
+                      className="group p-4 bg-white/[0.02] border border-white/5 rounded-xl
+                                 hover:bg-white/[0.05] hover:border-purple-500/30 cursor-pointer
+                                 transition-all flex items-start gap-3"
                     >
-                      <div className="flex flex-col items-center justify-center w-12 h-12 rounded-lg flex-shrink-0" style={{ backgroundColor: tc.bg, border: `1px solid ${tc.color}30` }}>
-                        <span className="text-lg font-bold leading-none" style={{ color: tc.color }}>{Math.round(event.triageScore)}</span>
-                        <span className="text-[8px] font-medium mt-0.5" style={{ color: tc.color }}>{event.triageLevel}</span>
+                      <div
+                        className="flex flex-col items-center justify-center w-12 h-12 rounded-lg flex-shrink-0"
+                        style={{ backgroundColor: tc.bg, border: `1px solid ${tc.color}30` }}
+                      >
+                        <span className="text-lg font-bold leading-none" style={{ color: tc.color }}>
+                          {Math.round(event.triageScore)}
+                        </span>
+                        <span className="text-[8px] font-medium mt-0.5" style={{ color: tc.color }}>
+                          {event.triageLevel}
+                        </span>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: st.color, backgroundColor: st.color + '15' }}>{st.icon} {st.label}</span>
-                          {event.categoryName && <span className="text-[10px] text-slate-500 bg-slate-800/50 px-1.5 rounded">{event.categoryName}</span>}
-                          {event.hasConflict && <span className="text-[10px] text-amber-400">&#9888;</span>}
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                            style={{ color: st.color, backgroundColor: st.color + '15' }}
+                          >
+                            {st.icon} {st.label}
+                          </span>
+                          {event.categoryName && (
+                            <span className="text-[10px] text-slate-500 bg-slate-800/50 px-1.5 rounded">
+                              {event.categoryName}
+                            </span>
+                          )}
+                          {event.hasConflict && (
+                            <span className="text-[10px] text-amber-400">&#9888;</span>
+                          )}
                           {eventCase && (
-                            <span className="text-[10px] font-medium px-1.5 rounded" style={{ color: (CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN).color, backgroundColor: (CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN).color + '15' }}>
+                            <span
+                              className="text-[10px] font-medium px-1.5 rounded"
+                              style={{
+                                color: (CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN).color,
+                                backgroundColor: (CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN).color + '15',
+                              }}
+                            >
                               Case: {(CASE_STATUS_COLORS[eventCase.status] ?? CASE_STATUS_COLORS.OPEN).label}
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-white font-medium">{event.title}</p>
-                        <p className="text-xs text-slate-400 mt-0.5">{event.summary}</p>
+                        <p className="text-sm text-white font-medium group-hover:text-purple-200 transition-colors">
+                          {event.title}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{event.summary}</p>
                         <div className="flex items-center gap-4 mt-1.5 text-[10px] text-slate-500">
                           <span>S:{event.score} U:{event.urgency} C:{event.confidence}</span>
                           <span>{event.sourceName}</span>
                           <span>{formatRelativeTime(event.publishedAt)}</span>
                         </div>
                       </div>
+                      {/* 호버 시 화살표 */}
+                      <span className="text-slate-600 group-hover:text-purple-400 transition-colors text-lg self-center flex-shrink-0">
+                        &#8250;
+                      </span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

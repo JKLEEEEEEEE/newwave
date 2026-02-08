@@ -762,8 +762,8 @@ async function fetchAIInsightV2(companyNameOrId: string): Promise<ApiResponseV2<
 }
 
 /** 리스크 드라이버 조회 → GET /api/v4/deals/{dealId}/drivers */
-async function fetchRiskDriversV2(dealId: string): Promise<ApiResponseV2<RiskDriversResponse>> {
-  const res = await fetchApi<any>(`/api/v4/deals/${encodeURIComponent(dealId)}/drivers`);
+async function fetchRiskDriversV2(dealId: string, signal?: AbortSignal): Promise<ApiResponseV2<RiskDriversResponse>> {
+  const res = await fetchApi<any>(`/api/v4/deals/${encodeURIComponent(dealId)}/drivers`, { signal });
   if (res.success && res.data) {
     const d = res.data;
     return success({
@@ -805,14 +805,17 @@ async function fetchRiskDriversV2(dealId: string): Promise<ApiResponseV2<RiskDri
 }
 
 /** AI 브리핑 조회 */
-async function fetchBriefingV2(dealId: string): Promise<ApiResponseV2<BriefingResponse>> {
+async function fetchBriefingV2(dealId: string, signal?: AbortSignal): Promise<ApiResponseV2<BriefingResponse>> {
   const url = `${BASE_URL}/api/v4/deals/${encodeURIComponent(dealId)}/briefing`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     return { success: true, data, timestamp: new Date().toISOString() };
   } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return { success: false, data: null as any, error: 'aborted', timestamp: new Date().toISOString() };
+    }
     console.error('[fetchBriefingV2]', err);
     return { success: false, data: null as any, error: String(err), timestamp: new Date().toISOString() };
   }

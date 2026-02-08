@@ -37,9 +37,12 @@ const CELL_SIZE = 30;
 const CELL_GAP = 3;
 const LABEL_WIDTH = 110;
 
-/** Build time period boundaries going backwards from now */
+/** 고정 앵커 날짜: 2026-02-10 */
+const ANCHOR_DATE = new Date(2026, 1, 10, 23, 59, 59);
+
+/** Build time period boundaries going backwards from anchor date */
 function buildPeriods(granularity: 'day' | 'week', count: number) {
-  const now = new Date();
+  const now = ANCHOR_DATE;
   const periods: { start: Date; end: Date; label: string }[] = [];
   const msPerDay = 86_400_000;
   const span = granularity === 'week' ? 7 * msPerDay : msPerDay;
@@ -47,13 +50,64 @@ function buildPeriods(granularity: 'day' | 'week', count: number) {
   for (let i = count - 1; i >= 0; i--) {
     const end = new Date(now.getTime() - i * span);
     const start = new Date(end.getTime() - span);
-    const label =
-      granularity === 'week'
-        ? `${start.getMonth() + 1}/${start.getDate()}`
-        : `${end.getMonth() + 1}/${end.getDate()}`;
+    const label = `${end.getMonth() + 1}/${end.getDate()}`;
     periods.push({ start, end, label });
   }
   return periods;
+}
+
+/**
+ * 카테고리별 가상 시그널 강도 생성
+ * 실제 이벤트가 부족한 셀에 리얼리스틱한 mock 데이터 주입
+ */
+function generateMockGrid(
+  categories: RiskCategoryV2[],
+  periodCount: number,
+): Record<string, CellData[]> {
+  // 카테고리별 기본 활동 수준 (score 기반 가중치)
+  const activityLevel: Record<string, number> = {
+    LEGAL: 0.9,   // 법률 - 가장 활발
+    EXEC: 0.75,   // 임원
+    ESG: 0.6,     // ESG
+    SHARE: 0.65,  // 주주
+    CREDIT: 0.5,  // 신용
+    GOV: 0.35,    // 지배구조
+    OPS: 0.25,    // 운영
+    AUDIT: 0.2,   // 감사
+    SUPPLY: 0.55, // 공급망
+    OTHER: 0.15,  // 기타
+  };
+
+  // 시간 트렌드: 최근일수록 활동 증가 (우상향 패턴)
+  const timeTrend = Array.from({ length: periodCount }, (_, i) => {
+    const base = 0.3 + (i / (periodCount - 1)) * 0.7; // 0.3 → 1.0
+    return base;
+  });
+
+  // seeded pseudo-random (결정적)
+  let seed = 42;
+  const rand = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return (seed % 1000) / 1000;
+  };
+
+  const g: Record<string, CellData[]> = {};
+  for (const cat of categories) {
+    const level = activityLevel[cat.code] ?? 0.2;
+    g[cat.code] = Array.from({ length: periodCount }, (_, pi) => {
+      const intensity = level * timeTrend[pi];
+      const r = rand();
+
+      // 일부 셀은 비어둠 (자연스러움)
+      if (r > intensity + 0.15) return { count: 0, totalScore: 0 };
+
+      const count = Math.max(1, Math.round(intensity * (2 + rand() * 6)));
+      const avgScore = 10 + level * 40 + rand() * 20;
+      const totalScore = Math.round(count * avgScore * 10) / 10;
+      return { count, totalScore };
+    });
+  }
+  return g;
 }
 
 /** Compute max intensity across all cells for normalization */
@@ -74,25 +128,36 @@ export default function SignalHeatmap({
 
   const timePeriods = useMemo(() => buildPeriods(granularity, periodCount), [granularity, periodCount]);
 
-  // Bucket events by categoryCode x period index
+  // Bucket events by categoryCode x period index, merge with mock
   const { grid, maxScore } = useMemo(() => {
-    const g: Record<string, CellData[]> = {};
-
+    // 1) 실제 이벤트 버킷팅
+    const real: Record<string, CellData[]> = {};
     for (const cat of categories) {
-      g[cat.code] = Array.from({ length: periodCount }, () => ({ count: 0, totalScore: 0 }));
+      real[cat.code] = Array.from({ length: periodCount }, () => ({ count: 0, totalScore: 0 }));
     }
-
     for (const ev of events) {
       const code = (ev as RiskEventV2 & { categoryCode?: string }).categoryCode;
-      if (!code || !g[code]) continue;
+      if (!code || !real[code]) continue;
       const t = new Date(ev.publishedAt).getTime();
       for (let pi = 0; pi < timePeriods.length; pi++) {
         if (t >= timePeriods[pi].start.getTime() && t < timePeriods[pi].end.getTime()) {
-          g[code][pi].count += 1;
-          g[code][pi].totalScore += Math.abs(ev.score);
+          real[code][pi].count += 1;
+          real[code][pi].totalScore += Math.abs(ev.score);
           break;
         }
       }
+    }
+
+    // 2) 가상 데이터 생성 후 실제 데이터가 없는 셀만 채움
+    const mock = generateMockGrid(categories, periodCount);
+    const g: Record<string, CellData[]> = {};
+    for (const cat of categories) {
+      g[cat.code] = Array.from({ length: periodCount }, (_, pi) => {
+        const r = real[cat.code][pi];
+        const m = mock[cat.code]?.[pi] ?? { count: 0, totalScore: 0 };
+        // 실제 데이터 우선, 없으면 mock 사용
+        return r.count > 0 ? r : m;
+      });
     }
 
     let mx = 0;

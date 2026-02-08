@@ -467,6 +467,14 @@ export interface BriefingResponse {
   riskScore: number;
   riskLevel: RiskLevelV2;
   executive_summary: string;
+  /** 1줄 헤드라인 (없으면 executive_summary 첫 문장 사용) */
+  headline?: string;
+  /** 24시간 리스크 점수 변화 */
+  delta_24h?: number;
+  /** 7일 리스크 점수 변화 */
+  delta_7d?: number;
+  /** 다음 권장 액션 (1줄) */
+  next_action?: string;
   context_analysis: {
     industry_context: string;
     timing_significance: string;
@@ -484,6 +492,18 @@ export interface BriefingResponse {
     issue: string;
     why_it_matters: string;
     watch_for: string;
+    /** Impact 등급 (없으면 인덱스 기반 추론) */
+    impact?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+    /** 발생 확률 등급 */
+    probability?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+    /** 트리거 조건 (없으면 watch_for 사용) */
+    trigger?: string;
+    /** 관련 근거 건수 */
+    evidence_count?: number;
+    /** 담당자 */
+    owner?: string;
+    /** 예상 조치 시한 */
+    eta?: string;
   }[];
   recommendations: {
     immediate_actions: string[];

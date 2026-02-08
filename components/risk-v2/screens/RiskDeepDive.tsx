@@ -307,6 +307,17 @@ function CompanyDetailLevel({
         </div>
       )}
 
+      {/* AI Risk Narrative — 역피라미드: 요약 먼저, 상세는 아래 */}
+      <div className="mb-8">
+        <AIRiskNarrative
+          dealId={dealId}
+          companyName={company.name}
+          riskScore={company.totalRiskScore}
+          riskLevel={company.riskLevel}
+          events={state.recentEvents}
+        />
+      </div>
+
       {/* 중앙: 10개 카테고리 그리드 (5열 x 2행) */}
       <h3 className="text-lg font-semibold text-white mb-4">
         리스크 카테고리 (10개)
@@ -385,16 +396,6 @@ function CompanyDetailLevel({
         <SignalHeatmap
           events={state.recentEvents}
           categories={categories}
-        />
-      </div>
-
-      {/* AI Risk Narrative */}
-      <div className="mb-8">
-        <AIRiskNarrative
-          dealId={dealId}
-          companyName={company.name}
-          riskScore={company.totalRiskScore}
-          riskLevel={company.riskLevel}
         />
       </div>
 
