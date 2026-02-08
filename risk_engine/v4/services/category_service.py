@@ -86,7 +86,38 @@ class CategoryService:
         })
 
     def update_category_scores(self, company_id: str) -> dict[str, int]:
-        """카테고리별 점수 계산 (5-Node: RiskEntity.riskScore 합산)"""
+        """카테고리별 점수 계산 (시간 감쇠 적용)
+
+        1단계: Entity.riskScore를 이벤트 시간 감쇠 합산으로 재계산
+        2단계: Category.score를 Entity 합산으로 계산
+        """
+        # 1. Entity riskScore 시간 감쇠 재계산
+        entity_decay_query = """
+        MATCH (c:Company {name: $companyId})-[:HAS_CATEGORY]->(rc:RiskCategory)
+              -[:HAS_ENTITY]->(ent:RiskEntity)-[:HAS_EVENT]->(evt:RiskEvent)
+        WHERE evt.score > 0
+        WITH ent, evt,
+             evt.score AS rawScore,
+             CASE
+               WHEN evt.publishedAt IS NULL THEN 30
+               ELSE toInteger((datetime().epochMillis - datetime(evt.publishedAt).epochMillis) / 86400000)
+             END AS daysAgo
+        WITH ent, rawScore, daysAgo,
+             CASE
+               WHEN daysAgo <= 3  THEN 1.0
+               WHEN daysAgo <= 7  THEN 0.80
+               WHEN daysAgo <= 14 THEN 0.55
+               WHEN daysAgo <= 30 THEN 0.30
+               WHEN daysAgo <= 60 THEN 0.15
+               ELSE 0.05
+             END AS decay
+        WITH ent, SUM(rawScore * decay) AS decayed, COUNT(*) AS cnt
+        SET ent.riskScore = CASE WHEN decayed > 100 THEN 100 ELSE toInteger(decayed) END,
+            ent.eventCount = cnt
+        """
+        self.client.execute_write(entity_decay_query, {"companyId": company_id})
+
+        # 2. Category score 합산
         query = """
         MATCH (c:Company {name: $companyId})-[:HAS_CATEGORY]->(rc:RiskCategory)
         OPTIONAL MATCH (rc)-[:HAS_ENTITY]->(re:RiskEntity)
@@ -94,13 +125,16 @@ class CategoryService:
              count(re) AS entityCount,
              sum(coalesce(re.riskScore, 0)) AS totalScore
 
+        WITH rc, entityCount,
+             CASE WHEN totalScore > 200 THEN 200 ELSE totalScore END AS totalScore
+
         SET rc.previousScore = rc.score,
-            rc.score = CASE WHEN totalScore > 100 THEN 100 ELSE toInteger(totalScore) END,
-            rc.weightedScore = rc.score * rc.weight,
+            rc.score = toInteger(totalScore),
+            rc.weightedScore = toInteger(totalScore) * rc.weight,
             rc.eventCount = entityCount,
             rc.trend = CASE
-                WHEN rc.score > coalesce(rc.previousScore, 0) THEN 'UP'
-                WHEN rc.score < coalesce(rc.previousScore, 0) THEN 'DOWN'
+                WHEN toInteger(totalScore) > coalesce(rc.previousScore, 0) THEN 'UP'
+                WHEN toInteger(totalScore) < coalesce(rc.previousScore, 0) THEN 'DOWN'
                 ELSE 'STABLE'
             END,
             rc.updatedAt = datetime()
@@ -113,5 +147,5 @@ class CategoryService:
         for r in results:
             scores[r["code"]] = r["score"]
 
-        logger.info(f"[{company_id}] 카테고리 점수 업데이트: {scores}")
+        logger.info(f"[{company_id}] 카테고리 점수 업데이트 (시간 감쇠): {scores}")
         return scores

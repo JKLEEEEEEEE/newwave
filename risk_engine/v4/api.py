@@ -630,7 +630,7 @@ async def get_deal_graph(deal_id: str):
     entity_query = """
     MATCH (c:Company {name: $dealId})-[:HAS_CATEGORY]->(rc:RiskCategory)-[:HAS_ENTITY]->(re:RiskEntity)
     WHERE rc.score > 0
-    RETURN re.name AS name, re.type AS type, re.score AS score,
+    RETURN re.name AS name, re.type AS type, re.riskScore AS score,
            rc.code AS catCode, rc.name AS catName,
            re.position AS position, re.description AS description
     """
@@ -762,7 +762,7 @@ async def get_deal_graph(deal_id: str):
         rel_ent_query = """
         MATCH (c:Company {name: $companyName})-[:HAS_CATEGORY]->(rc:RiskCategory)-[:HAS_ENTITY]->(re:RiskEntity)
         WHERE rc.score > 0
-        RETURN re.name AS name, re.type AS type, re.score AS score,
+        RETURN re.name AS name, re.type AS type, re.riskScore AS score,
                rc.code AS catCode, rc.name AS catName
         """
         rel_ents = client.execute_read(rel_ent_query, {"companyName": rel_name}) or []
@@ -1103,17 +1103,27 @@ def get_triaged_events(deal_id: str, limit: int = 30):
     """Smart Triage 이벤트 목록 (3축 점수: Severity + Urgency + Confidence) - def로 스레드풀 실행"""
     client = get_client()
 
-    # 모든 이벤트 가져오기
+    # 메인기업 + 관련기업 이벤트 모두 가져오기
     events_query = """
     MATCH (c:Company {name: $dealId})-[:HAS_CATEGORY]->(rc:RiskCategory)
           -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
     RETURN ev.id AS id, ev.title AS title, ev.summary AS summary,
            ev.type AS type, ev.score AS score, ev.severity AS severity,
-           ev.source AS sourceName, ev.url AS sourceUrl,
+           ev.sourceName AS sourceName, ev.sourceUrl AS sourceUrl,
            coalesce(toString(ev.publishedAt), toString(ev.createdAt), '') AS publishedAt,
            rc.code AS categoryCode, rc.name AS categoryName,
-           re.name AS entityName
-    ORDER BY ev.score DESC
+           re.name AS entityName, c.name AS companyName
+    UNION
+    MATCH (c:Company {name: $dealId})-[:HAS_RELATED]->(rel:Company)
+          -[:HAS_CATEGORY]->(rc:RiskCategory)
+          -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+    RETURN ev.id AS id, ev.title AS title, ev.summary AS summary,
+           ev.type AS type, ev.score AS score, ev.severity AS severity,
+           ev.sourceName AS sourceName, ev.sourceUrl AS sourceUrl,
+           coalesce(toString(ev.publishedAt), toString(ev.createdAt), '') AS publishedAt,
+           rc.code AS categoryCode, rc.name AS categoryName,
+           re.name AS entityName, rel.name AS companyName
+    ORDER BY score DESC
     LIMIT $limit
     """
     events_raw = client.execute_read(events_query, {"dealId": deal_id, "limit": limit}) or []
@@ -1171,6 +1181,7 @@ def get_triaged_events(deal_id: str, limit: int = 30):
             "playbook": playbook,
             "categoryCode": cat_code,
             "categoryName": e.get("categoryName") or "",
+            "companyName": e.get("companyName") or "",
         })
 
     # 트리아지 점수 기준 정렬

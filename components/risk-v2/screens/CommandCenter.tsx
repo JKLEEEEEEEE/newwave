@@ -472,76 +472,95 @@ export default function CommandCenter() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      {/* 딜 점수 게이지 — 항상 deals API 기준 (일관된 표시) */}
-                      <ScoreGauge
-                        score={company ? company.totalRiskScore : (deal.score ?? 0)}
-                        size={isSelected ? 60 : 48}
-                        directScore={company?.directScore}
-                        propagatedScore={company?.propagatedScore}
-                      />
+                      {/* 딜 점수 게이지 — 선택 + 로딩 중이면 스켈레톤 */}
+                      {isSelected && dealDetailLoading ? (
+                        <div className="w-[60px] h-[60px] rounded-full bg-slate-700/30 animate-pulse flex-shrink-0" />
+                      ) : (
+                        <ScoreGauge
+                          score={company ? company.totalRiskScore : (deal.score ?? 0)}
+                          size={isSelected ? 60 : 48}
+                          directScore={company?.directScore}
+                          propagatedScore={company?.propagatedScore}
+                        />
+                      )}
                       <div>
                         <h3 className="text-white font-medium text-base">{deal.name}</h3>
-                        <p className="text-slate-400 text-sm mt-0.5">
-                          {deal.targetCompanyName} {company ? `/ ${company.sector}` : ''}
-                        </p>
-                        {/* 점수 구성 표시 (선택된 딜) */}
-                        {isSelected && company && (company.directScore != null || company.propagatedScore != null) && (
-                          <p className="text-slate-500 text-[10px] mt-1 flex items-center gap-1.5">
-                            <span className="text-slate-400">직접 {company.directScore ?? 0}</span>
-                            <span className="text-slate-600">+</span>
-                            <span className="text-slate-400">전이 {company.propagatedScore ?? 0}</span>
-                            {company.propagatedScore > 0 && (
-                              <span className="text-slate-600 text-[9px]">(관련기업 영향)</span>
+                        {isSelected && dealDetailLoading ? (
+                          <div className="mt-1 space-y-1.5">
+                            <div className="h-3 w-32 bg-slate-700/30 rounded animate-pulse" />
+                            <div className="h-2.5 w-24 bg-slate-700/20 rounded animate-pulse" />
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-slate-400 text-sm mt-0.5">
+                              {deal.targetCompanyName} {company ? `/ ${company.sector}` : ''}
+                            </p>
+                            {/* 점수 구성 표시 (선택된 딜) */}
+                            {isSelected && company && (company.directScore != null || company.propagatedScore != null) && (
+                              <p className="text-slate-500 text-[10px] mt-1 flex items-center gap-1.5">
+                                <span className="text-slate-400">직접 {company.directScore ?? 0}</span>
+                                <span className="text-slate-600">+</span>
+                                <span className="text-slate-400">전이 {company.propagatedScore ?? 0}</span>
+                                {company.propagatedScore > 0 && (
+                                  <span className="text-slate-600 text-[9px]">(관련기업 영향)</span>
+                                )}
+                              </p>
                             )}
-                          </p>
-                        )}
-                        {/* Last event indicator */}
-                        {isSelected && recentEvents.length > 0 && (
-                          <p className="text-slate-500 text-[10px] mt-1 flex items-center gap-1">
-                            <span className="text-red-400">●</span>
-                            마지막 이벤트: {formatRelativeTime(recentEvents[0].publishedAt)}
-                          </p>
-                        )}
-                        {/* U22: 더블클릭 힌트 (선택된 카드에만 표시) */}
-                        {isSelected && company && (
-                          <p className="text-slate-600 text-[10px] mt-1">더블클릭으로 상세 분석 이동</p>
+                            {/* Last event indicator */}
+                            {isSelected && recentEvents.length > 0 && (
+                              <p className="text-slate-500 text-[10px] mt-1 flex items-center gap-1">
+                                <span className="text-red-400">●</span>
+                                마지막 이벤트: {formatRelativeTime(recentEvents[0].publishedAt)}
+                              </p>
+                            )}
+                            {/* U22: 더블클릭 힌트 (선택된 카드에만 표시) */}
+                            {isSelected && company && (
+                              <p className="text-slate-600 text-[10px] mt-1">더블클릭으로 상세 분석 이동</p>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      {/* Sparkline 추세 차트 */}
-                      {sparklineCache[deal.id] && (
-                        <div className="flex flex-col items-end gap-0.5">
-                          <Sparkline
-                            data={sparklineCache[deal.id]}
-                            width={72}
-                            height={28}
-                          />
-                          {(() => {
-                            const delta = getScoreDelta(sparklineCache[deal.id]);
-                            if (delta === 0) return null;
-                            return (
-                              <span className={`text-[10px] font-medium ${delta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                                {delta > 0 ? '+' : ''}{delta} (7d)
-                              </span>
-                            );
-                          })()}
-                        </div>
-                      )}
-                      {company ? (
-                        <RiskBadge level={company.riskLevel} animated />
-                      ) : deal.riskLevel ? (
-                        <RiskBadge level={deal.riskLevel} />
+                      {isSelected && dealDetailLoading ? (
+                        <div className="h-6 w-16 bg-slate-700/30 rounded-full animate-pulse" />
                       ) : (
-                        <span
-                          className="text-[10px] font-medium px-2 py-0.5 rounded-full"
-                          style={{
-                            color: statusColor,
-                            backgroundColor: statusColor + '20',
-                          }}
-                        >
-                          {deal.status}
-                        </span>
+                        <>
+                          {/* Sparkline 추세 차트 */}
+                          {sparklineCache[deal.id] && (
+                            <div className="flex flex-col items-end gap-0.5">
+                              <Sparkline
+                                data={sparklineCache[deal.id]}
+                                width={72}
+                                height={28}
+                              />
+                              {(() => {
+                                const delta = getScoreDelta(sparklineCache[deal.id]);
+                                if (delta === 0) return null;
+                                return (
+                                  <span className={`text-[10px] font-medium ${delta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                    {delta > 0 ? '+' : ''}{delta} (7d)
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          )}
+                          {company ? (
+                            <RiskBadge level={company.riskLevel} animated />
+                          ) : deal.riskLevel ? (
+                            <RiskBadge level={deal.riskLevel} />
+                          ) : (
+                            <span
+                              className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+                              style={{
+                                color: statusColor,
+                                backgroundColor: statusColor + '20',
+                              }}
+                            >
+                              {deal.status}
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -646,7 +665,7 @@ export default function CommandCenter() {
               ))}
             </>
           ) : filteredTriaged.length > 0 ? (
-            <AnimatePresence mode="popLayout">
+            <AnimatePresence>
               {filteredTriaged.slice(0, showFullView ? undefined : 8).map((event, idx) => {
                 const isNew = newEventIds.has(event.id);
                 const tc = TRIAGE_COLORS[event.triageLevel] ?? TRIAGE_COLORS.MEDIUM;
@@ -657,11 +676,10 @@ export default function CommandCenter() {
                 return (
                   <motion.div
                     key={event.id}
-                    layout
                     initial={{ opacity: 0, y: -10, scale: 0.98 }}
                     animate={{ opacity: 1, y: 0, scale: 1, ...(isNew ? { boxShadow: ['0 0 0px rgba(239,68,68,0)', '0 0 15px rgba(239,68,68,0.3)', '0 0 0px rgba(239,68,68,0)'] } : {}) }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ delay: idx * 0.02, duration: 0.25, layout: { duration: 0.15 } }}
+                    transition={{ delay: idx * 0.02, duration: 0.25 }}
                     className="rounded-2xl"
                   >
                     <GlassCard
@@ -777,12 +795,12 @@ export default function CommandCenter() {
             </AnimatePresence>
           ) : recentEvents.length > 0 ? (
             /* 트리아지 API 실패 시 기존 이벤트 폴백 */
-            <AnimatePresence mode="popLayout">
+            <AnimatePresence>
               {recentEvents.map((event, idx) => {
                 const isNew = newEventIds.has(event.id);
                 const sevColor = SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.MEDIUM;
                 return (
-                  <motion.div key={event.id} layout initial={{ opacity: 0, y: -20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.95 }} transition={{ delay: idx * 0.03, duration: 0.3 }} className="rounded-2xl">
+                  <motion.div key={event.id} initial={{ opacity: 0, y: -20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.95 }} transition={{ delay: idx * 0.03, duration: 0.3 }} className="rounded-2xl">
                     <GlassCard className={`p-3 ${isNew ? 'ring-1 ring-red-500/50' : ''}`}>
                       <div className="flex items-start gap-2">
                         <span className="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: sevColor.color }} />
@@ -969,11 +987,33 @@ export default function CommandCenter() {
                   <div className="text-[11px]"><span className="text-slate-500">출처:</span> <span className="text-white">{selectedTriageEvent.sourceName || '미확인'}</span></div>
                   <div className="text-[11px]"><span className="text-slate-500">소스등급:</span> <span className="text-white">{(SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).label} ({Math.round(selectedTriageEvent.sourceReliability * 100)}%)</span></div>
                 </div>
-                {selectedTriageEvent.sourceUrl && (
-                  <a href={selectedTriageEvent.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-purple-400 hover:text-purple-300 underline break-all block mt-1">
-                    원문 보기 &#8599;
-                  </a>
-                )}
+                {/* 출처 정보 섹션 (항상 표시) */}
+                <div className="mt-2 p-2.5 rounded-lg bg-slate-800/40 border border-white/5">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Source</span>
+                    {selectedTriageEvent.sourceTier && (
+                      <span
+                        className="text-[9px] font-medium px-1.5 py-0.5 rounded"
+                        style={{
+                          color: (SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).color,
+                          backgroundColor: (SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).color + '15',
+                        }}
+                      >
+                        {(SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).icon} {(SOURCE_TIER_LABELS[selectedTriageEvent.sourceTier] ?? SOURCE_TIER_LABELS.COMMUNITY).label}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-white font-medium">{selectedTriageEvent.sourceName || '미확인 출처'}</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">신뢰도: {Math.round(selectedTriageEvent.sourceReliability * 100)}%</p>
+                  {selectedTriageEvent.sourceUrl ? (
+                    <a href={selectedTriageEvent.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 mt-1.5 text-[11px] text-purple-400 hover:text-purple-300 transition-colors">
+                      <span>원문 보기</span>
+                      <span>&#8599;</span>
+                    </a>
+                  ) : (
+                    <p className="text-[10px] text-slate-600 mt-1">원문 URL이 제공되지 않았습니다</p>
+                  )}
+                </div>
               </div>
 
               {/* Playbook 액션 */}
@@ -1257,7 +1297,6 @@ export default function CommandCenter() {
                     whileHover={!isDim ? { scale: 1.02 } : undefined}
                     className={isDim ? 'opacity-30' : 'cursor-pointer'}
                     onClick={() => !isDim && handleCategoryClick(cat.code)}
-                    layout
                   >
                     <GlassCard
                       className="p-3"

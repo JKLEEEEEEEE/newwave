@@ -61,9 +61,9 @@ class ScoreService:
         return 0
 
     def _determine_status(self, score: int) -> str:
-        if score >= 50:
+        if score >= 60:
             return "FAIL"
-        elif score >= 30:
+        elif score >= 35:
             return "WARNING"
         return "PASS"
 

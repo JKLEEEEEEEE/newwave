@@ -60,34 +60,30 @@ def get_neo4j_client():
 
 
 def get_target_companies(client) -> List[str]:
-    """딜 대상 기업 목록 조회"""
+    """딜 대상 기업 + 관련기업 목록 조회 (5-Node 스키마)"""
     query = """
-    MATCH (dt:DealTarget)
-    RETURN dt.name AS name
+    MATCH (d:Deal)-[:TARGET]->(c:Company)
+    OPTIONAL MATCH (c)-[:HAS_RELATED]->(rel:Company)
+    WITH collect(DISTINCT c.name) + collect(DISTINCT rel.name) AS names
+    UNWIND names AS name
+    RETURN DISTINCT name
     """
     results = client.execute_read(query)
-    return [r['name'] for r in results] if results else []
+    return [r['name'] for r in results if r.get('name')] if results else []
 
 
 def get_companies_by_deal(client, deal_name: str) -> List[str]:
-    """딜 이름으로 대상 기업 조회"""
+    """딜 이름으로 대상 기업 + 관련기업 조회 (5-Node 스키마)"""
     query = """
     MATCH (d:Deal)-[:TARGET]->(c:Company)
     WHERE d.name CONTAINS $deal
-    RETURN c.name AS name
+    OPTIONAL MATCH (c)-[:HAS_RELATED]->(rel:Company)
+    WITH collect(DISTINCT c.name) + collect(DISTINCT rel.name) AS names
+    UNWIND names AS name
+    RETURN DISTINCT name
     """
     results = client.execute_read(query, {"deal": deal_name})
-    if results:
-        return [r['name'] for r in results]
-
-    # DealTarget 테이블도 검색
-    query2 = """
-    MATCH (dt:DealTarget)
-    WHERE dt.name CONTAINS $deal
-    RETURN dt.name AS name
-    """
-    results2 = client.execute_read(query2, {"deal": deal_name})
-    return [r['name'] for r in results2] if results2 else []
+    return [r['name'] for r in results if r.get('name')] if results else []
 
 
 # ============================================

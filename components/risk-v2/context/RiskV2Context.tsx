@@ -82,6 +82,9 @@ function riskV2Reducer(state: RiskV2State, action: RiskV2Action): RiskV2State {
         selectedCompanyId: null,
         selectedCategoryCode: null,
         selectedEntityId: null,
+        dealDetail: null,
+        dealDetailLoading: true,
+        recentEvents: [],
       };
 
     case 'DRILL_DOWN_TO_COMPANY':
