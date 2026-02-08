@@ -17,6 +17,7 @@ import type {
   RiskEntityV2,
   RiskEventV2,
 } from '../types-v2';
+import type { ArticleContent } from '../api-v2';
 import { CATEGORY_COLORS, SEVERITY_COLORS, ANIMATION } from '../design-tokens';
 import { CATEGORY_DEFINITIONS_V2 } from '../category-definitions';
 import { riskApiV2 } from '../api-v2';
@@ -662,7 +663,174 @@ function CategoryDetailLevel({
 }
 
 // ============================================
-// 레벨 4: 엔티티 상세 + 이벤트 타임라인
+// 기사 원문 뷰어 (이벤트 타임라인 대체)
+// ============================================
+function ArticleViewer({ events }: { events: RiskEventV2[] }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [articles, setArticles] = useState<Record<string, ArticleContent>>({});
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  // sourceUrl이 있는 이벤트만 필터
+  const newsEvents = useMemo(
+    () => events.filter(e => e.sourceUrl && e.sourceUrl.startsWith('http')),
+    [events]
+  );
+
+  const handleToggle = async (event: RiskEventV2) => {
+    if (expandedId === event.id) {
+      setExpandedId(null);
+      return;
+    }
+
+    setExpandedId(event.id);
+
+    // 이미 로드된 기사면 스킵
+    if (articles[event.id]) return;
+
+    setLoadingId(event.id);
+    const res = await riskApiV2.fetchArticleContent(event.sourceUrl);
+    if (res.success && res.data) {
+      setArticles(prev => ({ ...prev, [event.id]: res.data }));
+    } else {
+      setArticles(prev => ({
+        ...prev,
+        [event.id]: { title: event.title, content: '기사 내용을 불러올 수 없습니다.', url: event.sourceUrl, ok: false },
+      }));
+    }
+    setLoadingId(null);
+  };
+
+  if (newsEvents.length === 0) {
+    return (
+      <div className="text-slate-500 text-center py-8 text-sm">
+        참조 기사가 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h3 className="text-lg font-semibold text-white mb-4">
+        참조 기사 ({newsEvents.length}건)
+      </h3>
+      <motion.div
+        className="space-y-3"
+        variants={staggerContainer}
+        initial="initial"
+        animate="animate"
+      >
+        {newsEvents.map((event) => {
+          const sevColor = SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.LOW;
+          const isExpanded = expandedId === event.id;
+          const article = articles[event.id];
+          const isLoading = loadingId === event.id;
+
+          return (
+            <motion.div key={event.id} variants={staggerItem}>
+              <GlassCard
+                className={`transition-all duration-300 ${isExpanded ? 'ring-1 ring-purple-500/30' : ''}`}
+              >
+                {/* 헤더 (클릭으로 토글) */}
+                <button
+                  onClick={() => handleToggle(event)}
+                  className="w-full p-4 text-left"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                        {event.type === 'DISCLOSURE' ? '\uD83D\uDCCB' : '\uD83D\uDCF0'}{' '}
+                        {EVENT_TYPE_LABELS[event.type] ?? event.type}
+                      </span>
+                      <span
+                        className="px-2 py-0.5 rounded text-xs font-medium"
+                        style={{
+                          backgroundColor: sevColor.bg,
+                          color: sevColor.color,
+                          border: `1px solid ${sevColor.color}30`,
+                        }}
+                      >
+                        {getSeverityLabel(event.severity)}
+                      </span>
+                      <span className={`text-xs font-bold ${event.score > 0 ? 'text-red-400' : event.score < 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                        {event.score > 0 ? '+' : ''}{event.score}점
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-slate-500 text-xs">{formatDate(event.publishedAt)}</span>
+                      <span className="text-slate-500 text-xs">{event.sourceName}</span>
+                      <svg
+                        className={`w-4 h-4 text-slate-500 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                  <h4 className="text-white font-semibold text-sm leading-snug">
+                    {event.title}
+                  </h4>
+                  {!isExpanded && event.summary && event.summary !== event.title && (
+                    <p className="text-slate-500 text-xs mt-1 line-clamp-1">{event.summary}</p>
+                  )}
+                </button>
+
+                {/* 기사 본문 (확장 시) */}
+                <AnimatePresence>
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-4 pb-4 border-t border-white/5 pt-4">
+                        {isLoading ? (
+                          <div className="flex items-center gap-3 py-8 justify-center">
+                            <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                            <span className="text-slate-400 text-sm">기사 원문 로딩 중...</span>
+                          </div>
+                        ) : article ? (
+                          <div>
+                            <div className="max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
+                              <div className="text-slate-300 text-sm leading-relaxed whitespace-pre-line">
+                                {article.content}
+                              </div>
+                            </div>
+                            <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
+                              <a
+                                href={event.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-purple-400 text-xs hover:text-purple-300 transition-colors flex items-center gap-1"
+                                onClick={e => e.stopPropagation()}
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                </svg>
+                                원문 보기
+                              </a>
+                              {!article.ok && (
+                                <span className="text-amber-400/70 text-xs">원문 추출 불완전</span>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </GlassCard>
+            </motion.div>
+          );
+        })}
+      </motion.div>
+    </div>
+  );
+}
+
+// ============================================
+// 레벨 4: 엔티티 상세 + 이벤트 상세
 // ============================================
 function EntityDetailLevel({
   entityId,
@@ -837,107 +1005,8 @@ function EntityDetailLevel({
         </div>
       )}
 
-      {/* 이벤트 타임라인 */}
-      <h3 className="text-lg font-semibold text-white mb-6">
-        이벤트 타임라인 ({events.length}건)
-      </h3>
-
-      {events.length === 0 ? (
-        <div className="text-slate-400 text-center py-12">
-          등록된 이벤트가 없습니다.
-        </div>
-      ) : (
-        <motion.div
-          className="relative ml-4"
-          variants={staggerContainer}
-          initial="initial"
-          animate="animate"
-        >
-          {/* 세로 타임라인 선 */}
-          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-purple-500/30" />
-
-          {events.map((event, idx) => {
-            const sevColor =
-              SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.LOW;
-
-            return (
-              <motion.div
-                key={event.id}
-                variants={staggerItem}
-                className="relative pl-8 pb-8 last:pb-0"
-              >
-                {/* 타임라인 노드 */}
-                <div
-                  className="absolute left-0 top-2 w-3 h-3 rounded-full bg-purple-500 border-2 border-[#0a0f1e]"
-                  style={{
-                    transform: 'translateX(-5px)',
-                    boxShadow: '0 0 8px rgba(168, 85, 247, 0.4)',
-                  }}
-                />
-
-                {/* 이벤트 카드 */}
-                <GlassCard className="p-4">
-                  {/* 날짜 + 뱃지 행 */}
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-slate-500 text-sm">
-                      {formatDate(event.publishedAt)}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {/* 이벤트 타입 뱃지 */}
-                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center gap-1">
-                        <span>{event.type === 'DISCLOSURE' ? '\uD83D\uDCCB' : event.type === 'NEWS' ? '\uD83D\uDCF0' : '\u26A0\uFE0F'}</span>
-                        {EVENT_TYPE_LABELS[event.type] ?? event.type}
-                      </span>
-                      {/* 심각도 뱃지 */}
-                      <span
-                        className="px-2 py-0.5 rounded text-xs font-medium"
-                        style={{
-                          backgroundColor: sevColor.bg,
-                          color: sevColor.color,
-                          border: `1px solid ${sevColor.color}30`,
-                        }}
-                      >
-                        {getSeverityLabel(event.severity)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 타이틀 */}
-                  <h4 className="text-white font-semibold mb-1">
-                    {event.title}
-                  </h4>
-
-                  {/* 요약 */}
-                  <p className="text-slate-400 text-sm mb-3">
-                    {event.summary}
-                  </p>
-
-                  {/* 하단: 점수 + 소스 */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span
-                      className={`font-bold ${
-                        event.score > 0 ? 'text-red-400' : event.score < 0 ? 'text-emerald-400' : 'text-slate-400'
-                      }`}
-                    >
-                      {event.score > 0 ? '+' : ''}
-                      {event.score}점
-                    </span>
-                    <a
-                      href={event.sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-500 hover:text-purple-400 transition-colors"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {event.sourceName}
-                    </a>
-                  </div>
-                </GlassCard>
-              </motion.div>
-            );
-          })}
-        </motion.div>
-      )}
+      {/* 관련 기사 원문 */}
+      <ArticleViewer events={events} />
     </motion.div>
   );
 }

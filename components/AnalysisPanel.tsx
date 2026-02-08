@@ -7,9 +7,10 @@ interface Props {
   onHurdleClick: (page: number) => void;
   activeHurdlePage: number | null;
   onApprove?: () => void;
+  isRegistering?: boolean;
 }
 
-const AnalysisPanel: React.FC<Props> = ({ data, onHurdleClick, activeHurdlePage, onApprove }) => {
+const AnalysisPanel: React.FC<Props> = ({ data, onHurdleClick, activeHurdlePage, onApprove, isRegistering }) => {
   const { dealInfo, modules, verdict } = data;
   const [activeModule, setActiveModule] = useState<string>(modules[0].id);
 
@@ -218,9 +219,10 @@ const AnalysisPanel: React.FC<Props> = ({ data, onHurdleClick, activeHurdlePage,
             <div className="grid grid-cols-2 gap-8 pt-6">
               <button
                 onClick={onApprove}
-                className="py-5 bg-[#003366] text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl hover:scale-[1.03] transition-all active:scale-100"
+                disabled={isRegistering}
+                className={`py-5 text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl transition-all active:scale-100 ${isRegistering ? 'bg-slate-400 cursor-wait' : 'bg-[#003366] hover:scale-[1.03]'}`}
               >
-                최종 심사 승인 상신 (Group Approval)
+                {isRegistering ? '리스크 관제 등록 중...' : '최종 심사 승인 상신 (Group Approval)'}
               </button>
             </div>
           </div>

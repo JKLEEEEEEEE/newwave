@@ -93,7 +93,7 @@ const PDFUploadModal: React.FC<Props> = ({ isOpen, onClose, onUploadSuccess }) =
                     {isUploading ? (
                         <div className="flex flex-col items-center gap-4">
                             <div className="w-12 h-12 border-4 border-[#003366]/20 border-t-[#003366] rounded-full animate-spin"></div>
-                            <p className="text-sm font-bold text-[#003366] animate-pulse">Gemini 2.5 AI 분석 중...</p>
+                            <p className="text-sm font-bold text-[#003366] animate-pulse">분석 중...</p>
                         </div>
                     ) : (
                         <>

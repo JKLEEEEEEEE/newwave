@@ -30,7 +30,7 @@ const GlobalDashboard: React.FC<Props> = ({ deals, onDealClick, onAddClick }) =>
           <div className="flex items-center gap-3">
             <div className="w-1.5 h-4 bg-[#003366] rounded-full shadow-[0_0_8px_rgba(0,51,102,0.3)]"></div>
             <h3 className="text-sm font-black text-[#003366] uppercase tracking-widest">
-              투자 자산 실시간 감시 (Surveillance)
+              투자 자산 목록
             </h3>
           </div>
 

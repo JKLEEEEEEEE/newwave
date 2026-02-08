@@ -66,7 +66,8 @@ app.post('/api/im/upload', upload.single('file'), async (req, res) => {
     }
 
     const filePath = req.file.path;
-    const originalName = req.file.originalname;
+    // multer는 originalname을 latin1로 읽으므로 한글 파일명이 깨짐 → UTF-8로 변환
+    const originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf-8');
 
     try {
         // 1. Extract Text

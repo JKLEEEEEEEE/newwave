@@ -3,7 +3,6 @@ import React, { useState, useCallback, useMemo } from 'react';
 import Header from './components/Header';
 import DocumentViewer from './components/DocumentViewer';
 import AnalysisPanel from './components/AnalysisPanel';
-import MonitoringDashboard from './components/MonitoringDashboard';
 import GlobalDashboard from './components/GlobalDashboard';
 import Timeline from './components/Timeline';
 import ApiStatusBar from './components/ApiStatusBar';
@@ -242,7 +241,7 @@ const mergeApiData = (
 
 const App: React.FC = () => {
   const [deals, setDeals] = useState<DealSummary[]>(INITIAL_DEALS);
-  const [viewMode, setViewMode] = useState<'analysis' | 'monitoring' | 'global' | 'risk-v2'>('risk-v2');
+  const [viewMode, setViewMode] = useState<'analysis' | 'global' | 'risk-v2'>('global');
   const [selectedDealId, setSelectedDealId] = useState<string>('case1');
   const [leftWidth, setLeftWidth] = useState(42);
   const [isResizing, setIsResizing] = useState(false);
@@ -294,15 +293,54 @@ const App: React.FC = () => {
     return mergeApiData(base, apiResult);
   }, [selectedDealId, effectiveDeals, apiResult]);
 
-  const handleApprove = () => {
+  const [isRegistering, setIsRegistering] = useState(false);
+
+  const handleApprove = async () => {
     if (pendingDeal && selectedDealId === pendingDeal.id) {
+      // 파일명에서 회사명 추출 (회사명_IM.pdf → 회사명)
+      const fileName = apiResult?.run?.file_name || '';
+      const companyName = fileName
+        .replace(/\.pdf$/i, '')
+        .replace(/_IM$/i, '')
+        .replace(/_im$/i, '')
+        .trim();
+
       const confirmedDeal = { ...pendingDeal };
+      if (companyName) confirmedDeal.name = companyName;
       const calculatedTotal = analysisData.modules.reduce((acc, m) => acc + m.details.reduce((s, d) => s + d.score, 0), 0);
       const calculatedMax = analysisData.modules.reduce((acc, m) => acc + m.details.length * 5, 0);
       confirmedDeal.totalScore = calculatedTotal;
       confirmedDeal.maxScore = calculatedMax;
       setDeals(prev => [confirmedDeal, ...prev]);
       setPendingDeal(null);
+
+      if (companyName) {
+        // 실시간 리스크 관제에 딜 등록 + 자동 수집 트리거
+        setIsRegistering(true);
+        try {
+          const sector = analysisData.dealInfo?.sector || apiResult?.deal_terms?.PROJECT_INFO?.extracted_value || '';
+          const res = await fetch('http://localhost:8000/api/v4/deals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              companyName,
+              sector,
+              analyst: analysisData.dealInfo?.analyst || '',
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            console.log(`[리스크 관제 등록 완료] ${data.dealId}, 관련기업: ${data.relatedCompanies?.length || 0}개, 수집 시작됨`);
+          } else {
+            console.error('[리스크 관제 등록 실패]', await res.text());
+          }
+        } catch (err) {
+          console.error('[리스크 관제 등록 오류]', err);
+        } finally {
+          setIsRegistering(false);
+        }
+      }
+
       setViewMode('global');
     }
   };
@@ -350,14 +388,9 @@ const App: React.FC = () => {
                 onHurdleClick={(p) => setActiveRefPage(p)}
                 activeHurdlePage={activeRefPage}
                 onApprove={handleApprove}
+                isRegistering={isRegistering}
               />
             </div>
-          </main>
-        )}
-
-        {viewMode === 'monitoring' && (
-          <main className="flex-1 overflow-hidden bg-[#020617]">
-            <MonitoringDashboard />
           </main>
         )}
 
@@ -426,9 +459,16 @@ const App: React.FC = () => {
                 maxScore = Math.max(data.results.length * 5, 165);
               }
 
+              // 파일명에서 회사명 추출 (회사명_IM.pdf → 회사명)
+              const fileBasedName = data.run.file_name
+                .replace(/\.pdf$/i, '')
+                .replace(/_IM$/i, '')
+                .replace(/_im$/i, '')
+                .trim();
+
               const newDeal: DealSummary = {
                 id: `case_new_${runId}`,
-                name: terms?.PROJECT_NAME?.extracted_value || terms?.BORROWER?.extracted_value || targetName,
+                name: fileBasedName || terms?.PROJECT_NAME?.extracted_value || targetName,
                 sector: 'IB',
                 sponsor: terms?.SPONSOR?.extracted_value || sponsorName,
                 status: (validTotalScore / maxScore) * 100 > 60 ? HurdleStatus.PASS : HurdleStatus.WARNING,

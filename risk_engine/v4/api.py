@@ -1451,6 +1451,121 @@ def get_triaged_events(deal_id: str, limit: int = 30):
 
 
 # =============================================================================
+# Article Proxy API (기사 원문 추출)
+# =============================================================================
+
+import re as _re
+import requests as _requests
+from bs4 import BeautifulSoup as _BS
+
+
+@router.get("/proxy/article")
+def proxy_article(url: str):
+    """URL에서 기사 원문 텍스트를 추출하여 반환"""
+    if not url or not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="유효한 URL이 필요합니다")
+
+    # Google News redirect URLs → 브라우저에서 직접 열도록 안내
+    if "news.google.com/rss/articles/" in url:
+        return {"title": "Google News 기사", "content": "(Google News 리디렉트 링크입니다. '원문 보기'를 클릭하여 브라우저에서 확인하세요.)", "url": url, "ok": False}
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+        }
+        resp = _requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        resp.encoding = resp.apparent_encoding or "utf-8"
+
+        soup = _BS(resp.text, "html.parser")
+
+        # Remove noise elements
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside",
+                         "iframe", "noscript", "svg", "button", "form", "input"]):
+            tag.decompose()
+
+        title = ""
+        if soup.title and soup.title.string:
+            title = soup.title.string.strip()
+
+        # === Strategy 1: Naver News ===
+        content_el = soup.select_one("#dic_area, #newsct_article, .newsct_body, #articeBody, #articleBodyContents")
+        if content_el:
+            paragraphs = _extract_paragraphs(content_el)
+            if paragraphs:
+                return {"title": title, "content": "\n\n".join(paragraphs), "url": url, "ok": True}
+
+        # === Strategy 2: DART ===
+        if "dart.fss.or.kr" in url:
+            return {"title": title or "DART 공시", "content": "(DART 공시 문서는 원문 보기 링크를 클릭하세요)", "url": url, "ok": True}
+
+        # === Strategy 3: Generic - <article> tag ===
+        article_el = soup.find("article")
+        if article_el:
+            paragraphs = _extract_paragraphs(article_el)
+            if paragraphs:
+                return {"title": title, "content": "\n\n".join(paragraphs), "url": url, "ok": True}
+
+        # === Strategy 4: Largest content div (heuristic) ===
+        candidates = []
+        for div in soup.find_all(["div", "section"]):
+            text = div.get_text(separator=" ", strip=True)
+            # Filter out short fragments
+            if len(text) > 200:
+                # Prefer content-related class/id names
+                attrs_str = " ".join([
+                    div.get("id", ""),
+                    " ".join(div.get("class", [])),
+                ])
+                bonus = 1.5 if _re.search(r"(article|content|body|story|text|본문)", attrs_str, _re.I) else 1.0
+                candidates.append((len(text) * bonus, div))
+
+        if candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            best_div = candidates[0][1]
+            paragraphs = _extract_paragraphs(best_div)
+            if paragraphs:
+                return {"title": title, "content": "\n\n".join(paragraphs), "url": url, "ok": True}
+
+        # Fallback
+        body_text = soup.get_text(separator="\n", strip=True)
+        lines = [ln.strip() for ln in body_text.split("\n") if len(ln.strip()) > 30]
+        content = "\n\n".join(lines[:50])  # max 50 lines
+        return {"title": title, "content": content[:5000] if content else "(기사 내용을 추출할 수 없습니다)", "url": url, "ok": bool(content)}
+
+    except _requests.Timeout:
+        raise HTTPException(status_code=504, detail="기사 서버 응답 시간 초과")
+    except _requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"기사를 가져올 수 없습니다: {str(exc)[:200]}")
+    except Exception as exc:
+        logger.error("Article proxy error: %s", exc)
+        raise HTTPException(status_code=500, detail="기사 파싱 중 오류 발생")
+
+
+def _extract_paragraphs(el) -> list[str]:
+    """Extract clean paragraphs from a BeautifulSoup element."""
+    paragraphs = []
+    for p in el.find_all(["p", "div", "li", "h2", "h3", "h4"]):
+        text = p.get_text(separator=" ", strip=True)
+        # Skip very short or ad-like text
+        if len(text) < 15:
+            continue
+        if _re.search(r"(©|copyright|무단|전재|재배포|기자\s*$|관련기사)", text, _re.I):
+            continue
+        paragraphs.append(text)
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for p in paragraphs:
+        key = p[:80]
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+    return unique[:40]  # max 40 paragraphs
+
+
+# =============================================================================
 # Case Management API (SQLite 기반)
 # =============================================================================
 

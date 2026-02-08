@@ -996,6 +996,25 @@ async function checkApiHealthV2(): Promise<boolean> {
 }
 
 // ============================================
+// 기사 원문 프록시
+// ============================================
+
+export interface ArticleContent {
+  title: string;
+  content: string;
+  url: string;
+  ok: boolean;
+}
+
+async function fetchArticleContentV2(url: string): Promise<ApiResponseV2<ArticleContent>> {
+  const res = await fetchApi<ArticleContent>(`/api/v4/proxy/article?url=${encodeURIComponent(url)}`);
+  if (res.success && res.data) {
+    return success(res.data);
+  }
+  return { success: false, data: null as any, error: res.error || '기사를 불러올 수 없습니다', timestamp: new Date().toISOString() };
+}
+
+// ============================================
 // 내보내기 (riskApiV2 객체)
 // ============================================
 export const riskApiV2 = {
@@ -1024,6 +1043,8 @@ export const riskApiV2 = {
   fetchCases: fetchCasesV2,
   createCase: createCaseV2,
   updateCase: updateCaseV2,
+  // 기사 원문
+  fetchArticleContent: fetchArticleContentV2,
   // 유틸
   checkApiHealth: checkApiHealthV2,
   // 상태
