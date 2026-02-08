@@ -3,11 +3,9 @@ import React, { useState, useCallback, useMemo } from 'react';
 import Header from './components/Header';
 import DocumentViewer from './components/DocumentViewer';
 import AnalysisPanel from './components/AnalysisPanel';
-import MonitoringDashboard from './components/MonitoringDashboard';
 import GlobalDashboard from './components/GlobalDashboard';
 import Timeline from './components/Timeline';
 import ApiStatusBar from './components/ApiStatusBar';
-import { RiskPage } from './components/risk';
 import RiskShell from './components/risk-v2/layout/RiskShell';
 import { HurdleStatus, VerificationData, DealSummary, ScoringModule } from './types';
 
@@ -126,7 +124,7 @@ const getAnalysisData = (caseId: string): VerificationData => {
 };
 
 const App: React.FC = () => {
-  const [viewMode, setViewMode] = useState<'analysis' | 'monitoring' | 'global' | 'risk' | 'risk-v2'>('risk-v2');
+  const [viewMode, setViewMode] = useState<'analysis' | 'global' | 'risk-v2'>('risk-v2');
   const [selectedDealId, setSelectedDealId] = useState<string>('case1');
   const [leftWidth, setLeftWidth] = useState(42);
   const [isResizing, setIsResizing] = useState(false);
@@ -170,12 +168,6 @@ const App: React.FC = () => {
           </main>
         )}
 
-        {viewMode === 'monitoring' && (
-          <main className="flex-1 overflow-hidden bg-[#020617]">
-            <MonitoringDashboard />
-          </main>
-        )}
-
         {viewMode === 'global' && (
           <main className="flex-1 overflow-y-auto custom-scrollbar">
             <GlobalDashboard
@@ -186,12 +178,6 @@ const App: React.FC = () => {
                 setViewMode('analysis');
               }}
             />
-          </main>
-        )}
-
-        {viewMode === 'risk' && (
-          <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50">
-            <RiskPage />
           </main>
         )}
 
