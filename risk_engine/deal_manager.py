@@ -254,14 +254,17 @@ class DealService:
             # 한국어 기업만 필터 + 최대 10개
             import re
             items = data.get("list", [])
+            # 줄바꿈 제거 + 비기업 행("합계", "소계") 필터
+            SKIP_NAMES = {"합계", "소계", "계", "총계", "합 계"}
             korean_items = [
                 item for item in items
                 if re.search(r'[가-힣]', item.get("inv_prm", ""))
-                and item.get("inv_prm", "").strip() != company_name
+                and re.sub(r'\s+', '', item.get("inv_prm", "")).strip() != company_name
+                and re.sub(r'\s+', '', item.get("inv_prm", "")).strip() not in SKIP_NAMES
             ][:7]
 
             for item in korean_items:
-                rel_name = (item.get("inv_prm") or "").strip()
+                rel_name = re.sub(r'\s+', '', (item.get("inv_prm") or "")).strip()
                 if not rel_name:
                     continue
 
