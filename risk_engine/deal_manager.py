@@ -258,7 +258,7 @@ class DealService:
                 item for item in items
                 if re.search(r'[가-힣]', item.get("inv_prm", ""))
                 and item.get("inv_prm", "").strip() != company_name
-            ][:10]
+            ][:7]
 
             for item in korean_items:
                 rel_name = (item.get("inv_prm") or "").strip()
