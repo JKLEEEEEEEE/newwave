@@ -37,3 +37,11 @@ _integration_test.mjs
 nul
 *.png
 .pdca-status.json
+
+# Debug/test outputs
+data/
+screenshots/
+*.mjs
+scripts/*_debug*.json
+scripts/*_result*.json
+scripts/*_titles*.json
