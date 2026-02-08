@@ -84,6 +84,15 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<Api
       timestamp: new Date().toISOString(),
     };
   } catch (error) {
+    // AbortError는 정상적인 요청 취소이므로 무음 처리
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return {
+        success: false,
+        data: null as unknown as T,
+        error: 'aborted',
+        timestamp: new Date().toISOString(),
+      };
+    }
     console.error(`[RiskV2 API] Error (${endpoint}):`, error);
     return {
       success: false,

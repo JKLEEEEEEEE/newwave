@@ -109,7 +109,7 @@ export default function NavigationBar() {
               className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium
                          border border-red-500/30 bg-red-500/10 hover:bg-red-500/20
                          transition-all duration-200 ease-out
-                         ${!criticalAcknowledged ? 'animate-bounce' : ''}`}
+                         ${!criticalAcknowledged ? 'animate-pulse' : ''}`}
               title="CRITICAL Alerts"
             >
               {/* 경고 아이콘 */}
@@ -158,17 +158,22 @@ export default function NavigationBar() {
                   ))}
                 </div>
 
-                {/* 하단: 확인 버튼 (애니메이션 멈춤, 알림은 유지) */}
-                {!criticalAcknowledged && (
-                  <div className="px-4 py-3 border-t border-white/5">
-                    <button
-                      onClick={() => { acknowledgeCriticalAlerts(); }}
-                      className="w-full py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
-                    >
-                      확인 ({criticalAlerts.length}건)
-                    </button>
-                  </div>
-                )}
+                {/* 하단: 확인 버튼 (애니메이션 멈춤, 드롭다운 닫기) */}
+                <div className="px-4 py-3 border-t border-white/5">
+                  <button
+                    onClick={() => {
+                      if (!criticalAcknowledged) acknowledgeCriticalAlerts();
+                      setAlertDropdownOpen(false);
+                    }}
+                    className={`w-full py-2 text-sm font-medium rounded-lg transition-colors ${
+                      !criticalAcknowledged
+                        ? 'text-white bg-red-600 hover:bg-red-500'
+                        : 'text-slate-300 bg-slate-700 hover:bg-slate-600'
+                    }`}
+                  >
+                    {!criticalAcknowledged ? `확인 (${criticalAlerts.length}건)` : '닫기'}
+                  </button>
+                </div>
               </div>
             )}
           </div>

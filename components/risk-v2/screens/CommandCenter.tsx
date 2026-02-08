@@ -484,6 +484,7 @@ export default function CommandCenter() {
                           size={isSelected ? 60 : 48}
                           directScore={company?.directScore}
                           propagatedScore={company?.propagatedScore}
+                          riskLevel={company?.riskLevel ?? deal.riskLevel}
                         />
                       )}
                       <div>

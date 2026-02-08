@@ -23,10 +23,17 @@ interface ScoreGaugeProps {
   propagatedScore?: number;
   label?: string;
   className?: string;
+  /** API에서 내려온 riskLevel로 색상 오버라이드 (CRITICAL 이벤트 기반 판정용) */
+  riskLevel?: 'PASS' | 'WARNING' | 'CRITICAL';
 }
 
 /** 점수에 따른 색상 결정 (getScoreLevel 기준: 50/30) */
-function getGaugeColor(score: number, _maxScore: number): string {
+function getGaugeColor(score: number, _maxScore: number, riskLevel?: string): string {
+  // riskLevel 오버라이드가 있으면 점수와 무관하게 해당 색상 사용
+  if (riskLevel === 'CRITICAL') return RISK_COLORS.CRITICAL.primary;
+  if (riskLevel === 'WARNING') return RISK_COLORS.WARNING.primary;
+  if (riskLevel === 'PASS') return RISK_COLORS.PASS.primary;
+  // 오버라이드 없으면 기존 점수 기반
   if (score >= 50) return RISK_COLORS.CRITICAL.primary;
   if (score >= 30) return RISK_COLORS.WARNING.primary;
   return RISK_COLORS.PASS.primary;
@@ -41,6 +48,7 @@ export default function ScoreGauge({
   propagatedScore,
   label,
   className = '',
+  riskLevel,
 }: ScoreGaugeProps) {
   // SVG 계산
   const strokeWidth = size * 0.08;
@@ -50,8 +58,8 @@ export default function ScoreGauge({
   const progress = clampedScore / maxScore;
   const strokeDashoffset = circumference * (1 - progress);
 
-  // 색상
-  const gaugeColor = useMemo(() => getGaugeColor(score, maxScore), [score, maxScore]);
+  // 색상 (riskLevel 오버라이드 우선)
+  const gaugeColor = useMemo(() => getGaugeColor(score, maxScore, riskLevel), [score, maxScore, riskLevel]);
 
   // 폰트 크기 계산
   const scoreFontSize = size * 0.28;

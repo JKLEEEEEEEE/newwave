@@ -689,6 +689,7 @@ export default function SupplyChainXRay() {
                   size={56}
                   directScore={mainCompany.directScore}
                   propagatedScore={mainCompany.propagatedScore}
+                  riskLevel={mainCompany.riskLevel}
                 />
                 <div>
                   <p className="text-white text-sm font-semibold">{mainCompany.name}</p>

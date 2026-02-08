@@ -9,7 +9,7 @@
  *   - NAVIGATE_BACK_TO: 지정 수준 이하 초기화
  */
 
-import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo } from 'react';
 import type {
   RiskV2State,
   RiskV2Action,
@@ -312,7 +312,6 @@ export function RiskV2Provider({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // CRITICAL 알림 독립 폴링 (전체 딜 대상, 항상 최신 상태 유지)
-  const prevAlertCountRef = useRef(0);
   useEffect(() => {
     let cancelled = false;
     const fetchAlerts = async () => {
@@ -320,13 +319,8 @@ export function RiskV2Provider({
         const res = await riskApiV2.fetchCriticalAlerts();
         if (cancelled || !res.success) return;
         const alerts = res.data || [];
-        // 항상 최신 API 결과로 교체
+        // 항상 최신 API 결과로 교체 (리듀서에서 새 이벤트 감지 → acknowledged 리셋)
         dispatch({ type: 'SET_CRITICAL_ALERTS', payload: alerts });
-        // 새 알림이 추가되면 acknowledged 리셋 (다시 삐용삐용)
-        if (alerts.length > prevAlertCountRef.current) {
-          dispatch({ type: 'SET_CRITICAL_ALERTS', payload: alerts });
-        }
-        prevAlertCountRef.current = alerts.length;
       } catch (err) {
         console.error('[RiskV2] CRITICAL 알림 조회 에러:', err);
       }

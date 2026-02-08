@@ -280,6 +280,7 @@ function CompanyDetailLevel({
           showBreakdown
           directScore={company.directScore}
           propagatedScore={company.propagatedScore}
+          riskLevel={company.riskLevel}
         />
         <div>
           <h2 className="text-2xl font-bold text-white">{company.name}</h2>
