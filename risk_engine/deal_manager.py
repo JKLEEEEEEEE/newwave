@@ -157,9 +157,9 @@ class DealService:
         Returns:
             corpCode (str) or None
         """
-        dart_api_key = os.getenv("DART_API_KEY")
+        dart_api_key = os.getenv("OPENDART_API_KEY")
         if not dart_api_key:
-            logger.warning("DART_API_KEY not set, skipping corpCode lookup")
+            logger.warning("OPENDART_API_KEY not set, skipping corpCode lookup")
             return None
 
         url = f"https://opendart.fss.or.kr/api/corpCode.xml?crtfc_key={dart_api_key}"
@@ -205,9 +205,9 @@ class DealService:
         Returns:
             list of {name, corpCode, relation, tier}
         """
-        dart_api_key = os.getenv("DART_API_KEY")
+        dart_api_key = os.getenv("OPENDART_API_KEY")
         if not dart_api_key:
-            logger.warning("DART_API_KEY not set, skipping related companies")
+            logger.warning("OPENDART_API_KEY not set, skipping related companies")
             return []
 
         # corpCode 조회
@@ -224,26 +224,45 @@ class DealService:
         current_year = datetime.now().year
 
         url = "https://opendart.fss.or.kr/api/otrCprInvstmntSttus.json"
-        params = {
-            "crtfc_key": dart_api_key,
-            "corp_code": corp_code,
-            "bsns_year": str(current_year - 1),
-            "reprt_code": "11011",  # 사업보고서
-        }
+
+        # 최신 연도부터 시도 (사업보고서가 아직 없을 수 있으므로)
+        data = None
+        for year in range(current_year - 1, current_year - 4, -1):
+            params = {
+                "crtfc_key": dart_api_key,
+                "corp_code": corp_code,
+                "bsns_year": str(year),
+                "reprt_code": "11011",  # 사업보고서
+            }
+            try:
+                resp = requests.get(url, params=params, timeout=20)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("status") == "000":
+                    logger.info(f"DART related API hit: year={year}, {len(data.get('list', []))} items")
+                    break
+            except Exception:
+                continue
+            data = None
 
         related = []
         try:
-            resp = requests.get(url, params=params, timeout=20)
-            resp.raise_for_status()
-            data = resp.json()
-
-            if data.get("status") != "000":
-                logger.info(f"DART related API: {data.get('message', 'no data')}")
+            if not data or data.get("status") != "000":
+                logger.info(f"DART related API: no data for {company_name}")
                 return []
 
-            for item in data.get("list", []):
+            # 한국어 기업만 필터 + 최대 10개
+            import re
+            items = data.get("list", [])
+            korean_items = [
+                item for item in items
+                if re.search(r'[가-힣]', item.get("inv_prm", ""))
+                and item.get("inv_prm", "").strip() != company_name
+            ][:10]
+
+            for item in korean_items:
                 rel_name = (item.get("inv_prm") or "").strip()
-                if not rel_name or rel_name == company_name:
+                if not rel_name:
                     continue
 
                 # Company + 10 Categories 생성
