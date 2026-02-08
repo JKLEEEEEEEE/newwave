@@ -90,6 +90,71 @@ def get_deals():
     }
 
 
+class CreateDealRequest(BaseModel):
+    companyName: str
+    sector: str = ""
+    analyst: str = ""
+    ticker: str = ""
+    market: str = ""
+
+
+@router.post("/deals")
+def create_deal(req: CreateDealRequest):
+    """딜 등록 + 자동 수집 트리거"""
+    client = get_client()
+    from risk_engine.deal_manager import DealService
+    service = DealService(client)
+
+    # 1. 딜 생성
+    result = service.create_deal(req.companyName, req.sector, req.analyst, req.ticker, req.market)
+
+    # 2. corpCode 자동 탐색
+    corp_code = service.lookup_corp_code(req.companyName)
+
+    # 3. 관련기업 자동 탐색 (corpCode가 있을 때만)
+    related = []
+    if corp_code:
+        related = service.discover_related_companies(req.companyName)
+
+    # 4. 백그라운드 수집 트리거
+    import threading
+    def _bg_collect():
+        try:
+            service.trigger_collection(result["dealId"])
+        except Exception as e:
+            logger.error(f"Background collection failed: {e}")
+
+    threading.Thread(target=_bg_collect, daemon=True).start()
+
+    return {
+        "dealId": result["dealId"],
+        "company": result,
+        "corpCode": corp_code,
+        "relatedCompanies": related,
+        "collectionTriggered": True,
+    }
+
+
+@router.delete("/deals/{deal_id}")
+def delete_deal(deal_id: str):
+    """딜 삭제"""
+    client = get_client()
+    from risk_engine.deal_manager import DealService
+    service = DealService(client)
+    service.delete_deal(deal_id)
+    return {"deleted": deal_id}
+
+
+@router.post("/deals/{deal_id}/collect")
+def trigger_collection(deal_id: str):
+    """수동 수집 재실행"""
+    client = get_client()
+    from risk_engine.deal_manager import DealService
+    service = DealService(client)
+    result = service.trigger_collection(deal_id)
+    return result
+
+
 @router.get("/deals/{deal_id}", response_model=DealDetailResponse)
 def get_deal_detail(deal_id: str):
     """딜 상세 조회 (전체 드릴다운 데이터) - def로 스레드풀 실행 (이벤트루프 블로킹 방지)"""
@@ -561,7 +626,8 @@ async def get_deal_graph(deal_id: str):
     MATCH (c:Company {name: $dealId})
     RETURN c.name AS name, c.totalRiskScore AS score, c.riskLevel AS riskLevel,
            c.sector AS sector, c.directScore AS directScore,
-           c.propagatedScore AS propagatedScore
+           c.propagatedScore AS propagatedScore,
+           c.ticker AS ticker, c.market AS market, c.corpCode AS corpCode
     """
     company = client.execute_read_single(company_query, {"dealId": deal_id})
     if not company:
@@ -578,7 +644,14 @@ async def get_deal_graph(deal_id: str):
         "riskLevel": risk_level,
         "tier": 1,
         "selectionReason": f"투자 대상 기업 (직접점수: {company.get('directScore', 0) or 0}, 전이점수: {company.get('propagatedScore', 0) or 0})",
-        "metadata": {"sector": company.get("sector", ""), "directScore": company.get("directScore", 0) or 0},
+        "metadata": {
+            "sector": company.get("sector", ""),
+            "ticker": company.get("ticker", ""),
+            "market": company.get("market", ""),
+            "corpCode": company.get("corpCode", ""),
+            "directScore": company.get("directScore", 0) or 0,
+            "propagatedScore": company.get("propagatedScore", 0) or 0,
+        },
     })
 
     links.append({
@@ -676,7 +749,9 @@ async def get_deal_graph(deal_id: str):
     related_query = """
     MATCH (c:Company {name: $dealId})-[r:HAS_RELATED]->(rc:Company)
     RETURN rc.name AS name, rc.totalRiskScore AS score, rc.riskLevel AS riskLevel,
-           rc.sector AS sector, r.relation AS relation, r.tier AS tier
+           rc.sector AS sector, r.relation AS relation, r.tier AS tier,
+           rc.ticker AS ticker, rc.market AS market,
+           rc.directScore AS directScore, rc.totalRiskScore AS totalRiskScore
     """
     related = client.execute_read(related_query, {"dealId": deal_id}) or []
 
@@ -710,7 +785,15 @@ async def get_deal_graph(deal_id: str):
             "riskLevel": rel_level,
             "tier": rel_tier,
             "selectionReason": f"{relation_type} 관계, 리스크 전이율 {round(rel_score * 0.3)}점",
-            "metadata": {"relation": relation_type, "sector": rel.get("sector", "")},
+            "metadata": {
+                "relation": relation_type,
+                "sector": rel.get("sector", ""),
+                "ticker": rel.get("ticker", ""),
+                "market": rel.get("market", ""),
+                "directScore": rel.get("directScore", 0) or 0,
+                "tier": rel_tier,
+                "transferRate": 0.3 if rel_tier == 1 else 0.1,
+            },
         })
 
         links.append({
@@ -794,6 +877,59 @@ async def get_deal_graph(deal_id: str):
                 "dependency": 0.5,
                 "label": rent.get("type", "ENTITY"),
                 "riskTransfer": rent_score,
+            })
+
+    # 7. 주요 RiskEvent 노드 (score >= 20, 최대 20개)
+    event_query = """
+    MATCH (c:Company {name: $dealId})-[:HAS_CATEGORY]->(rc:RiskCategory)
+          -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+    WHERE ev.score >= 20
+    RETURN ev.id AS id, ev.title AS title, ev.score AS score,
+           ev.type AS type, ev.severity AS severity,
+           ev.sourceUrl AS sourceUrl, ev.sourceName AS sourceName,
+           re.name AS entityName, rc.code AS catCode, rc.name AS catName
+    ORDER BY ev.score DESC
+    LIMIT 20
+    """
+    events = client.execute_read(event_query, {"dealId": deal_id}) or []
+    event_ids_seen = set()
+    for evt in events:
+        evt_id = evt.get("id", "")
+        if not evt_id or evt_id in event_ids_seen:
+            continue
+        event_ids_seen.add(evt_id)
+        evt_score = evt.get("score", 0) or 0
+        evt_level = "FAIL" if evt_score >= 50 else ("WARNING" if evt_score >= 20 else "PASS")
+
+        nodes.append({
+            "id": evt_id,
+            "name": (evt.get("title", "")[:30] + "...") if len(evt.get("title", "")) > 30 else evt.get("title", ""),
+            "nodeType": "riskEvent",
+            "riskScore": evt_score,
+            "riskLevel": evt_level,
+            "tier": 4,
+            "selectionReason": f"{evt.get('catName', '')} > {evt.get('entityName', '')}에서 발생",
+            "metadata": {
+                "type": evt.get("type", ""),
+                "severity": evt.get("severity", ""),
+                "sourceUrl": evt.get("sourceUrl", ""),
+                "sourceName": evt.get("sourceName", ""),
+                "entityName": evt.get("entityName", ""),
+                "categoryCode": evt.get("catCode", ""),
+                "fullTitle": evt.get("title", ""),
+            },
+        })
+
+        # Link: Entity → Event
+        ent_id = f"RE_{deal_id}_{evt.get('catCode', 'OTHER')}_{evt.get('entityName', '')}"
+        if ent_id in entity_ids_seen:
+            links.append({
+                "source": ent_id,
+                "target": evt_id,
+                "relationship": "HAS_EVENT",
+                "dependency": 0.3,
+                "label": evt.get("type", "EVENT"),
+                "riskTransfer": evt_score,
             })
 
     return {

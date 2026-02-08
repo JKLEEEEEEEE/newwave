@@ -257,6 +257,18 @@ class NewsCollectorV2:
         self.seen_urls.clear()
         self._session_queries.clear()
 
+    def _resolve_url(self, url: str) -> str:
+        """Google News 리다이렉트 URL -> 실제 기사 URL 해석"""
+        if not url or 'news.google.com' not in url:
+            return url
+        try:
+            resp = requests.head(url, allow_redirects=True, timeout=5)
+            if resp.url and 'news.google.com' not in resp.url:
+                return resp.url
+        except Exception:
+            pass
+        return url
+
     def collect_news(
         self,
         company_name: str,
@@ -388,7 +400,7 @@ class NewsCollectorV2:
 
                 news = NewsData(
                     title=title_text.strip(),
-                    url=url_text.strip(),
+                    url=self._resolve_url(url_text.strip()),
                     published_at=pub_date_text,
                     source=source_config["name"],
                     publisher=publisher,

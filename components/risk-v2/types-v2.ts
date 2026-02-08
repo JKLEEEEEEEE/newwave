@@ -196,7 +196,7 @@ export interface CompanyRelationV2 {
 export interface GraphNode3D {
   id: string;
   name: string;
-  nodeType: 'deal' | 'mainCompany' | 'relatedCompany' | 'riskCategory' | 'riskEntity';
+  nodeType: 'deal' | 'mainCompany' | 'relatedCompany' | 'riskCategory' | 'riskEntity' | 'riskEvent';
   riskScore: number;
   riskLevel: RiskLevelV2;
   tier: number;

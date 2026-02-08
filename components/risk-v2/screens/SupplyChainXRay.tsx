@@ -63,6 +63,7 @@ const NODE_LEGEND = [
   { type: 'relatedCompany', label: 'Related Company', color: '#9B8AE8', tier: 'Tier 1-2', shape: 'circle-sm' },
   { type: 'riskCategory', label: 'Risk Category', color: '#4ECDC4', tier: 'Tier 2', shape: 'diamond' },
   { type: 'riskEntity', label: 'Risk Entity', color: '#8296AA', tier: 'Tier 3', shape: 'dot' },
+  { type: 'riskEvent', label: 'Risk Event', color: '#FF6B6B', tier: 'Tier 4', shape: 'dot' },
 ];
 
 // Step 2: 헬퍼 함수 - 노드 타입별 색상
@@ -72,6 +73,7 @@ function getNodeTypeColor(nodeType: string): string {
     case 'relatedCompany': return '#9B8AE8';
     case 'riskCategory': return '#4ECDC4';
     case 'riskEntity': return '#8296AA';
+    case 'riskEvent': return '#FF6B6B';
     default: return '#8296AA';
   }
 }
@@ -83,6 +85,7 @@ function getLinkTypeColor(relationship: string): string {
     case 'HAS_CATEGORY': return '#3BB5A8';
     case 'HAS_ENTITY': return '#7E72C0';
     case 'HAS_RELATED': return '#C9963A';
+    case 'HAS_EVENT': return '#FF6B6B';
     default: return '#A8B8CC';
   }
 }
@@ -96,7 +99,8 @@ function getLinkCascadeStep(relationship: string): number {
     case 'HAS_CATEGORY': return 1;
     case 'HAS_ENTITY': return 2;
     case 'HAS_RELATED': return 3;
-    default: return 4;
+    case 'HAS_EVENT': return 4;
+    default: return 5;
   }
 }
 
@@ -373,6 +377,7 @@ export default function SupplyChainXRay() {
       : node.nodeType === 'relatedCompany' ? '관련기업'
       : node.nodeType === 'riskCategory' ? '리스크 카테고리'
       : node.nodeType === 'riskEntity' ? '리스크 엔티티'
+      : node.nodeType === 'riskEvent' ? '리스크 이벤트'
       : 'Deal';
     const levelColor = node.riskLevel === 'FAIL' ? '#ef4444'
       : node.riskLevel === 'WARNING' ? '#eab308'
@@ -408,12 +413,13 @@ export default function SupplyChainXRay() {
     const color = getNodeTypeColor(node.nodeType);
     const size = getNode3DSize(node.nodeType, node.riskScore) * 0.35;
 
-    // 노드 tier 매핑: mainCompany=0, relatedCompany=1, riskCategory=2, riskEntity=3
-    let nodeTier = 3;
+    // 노드 tier 매핑: mainCompany=0, relatedCompany=1, riskCategory=2, riskEntity=3, riskEvent=4
+    let nodeTier = 4;
     if (node.nodeType === 'mainCompany') nodeTier = 0;
     else if (node.nodeType === 'relatedCompany') nodeTier = 1;
     else if (node.nodeType === 'riskCategory') nodeTier = 2;
     else if (node.nodeType === 'riskEntity') nodeTier = 3;
+    else if (node.nodeType === 'riskEvent') nodeTier = 4;
 
     // userData for cascade effect (Step 8)
     group.userData = { nodeType: node.nodeType, nodeTier, nodeColor: color, nodeId: node.id };
@@ -985,6 +991,7 @@ export default function SupplyChainXRay() {
                  : selectedNode.nodeType === 'relatedCompany' ? 'Related Company'
                  : selectedNode.nodeType === 'riskCategory' ? 'Risk Category'
                  : selectedNode.nodeType === 'riskEntity' ? 'Risk Entity'
+                 : selectedNode.nodeType === 'riskEvent' ? 'Risk Event'
                  : 'Deal'}
               </span>
               <span className="text-xs text-slate-500">Tier {selectedNode.tier}</span>
@@ -1019,6 +1026,16 @@ export default function SupplyChainXRay() {
                     {selectedNode.metadata?.sector && (
                       <p>섹터: <span className="text-white">{String(selectedNode.metadata.sector)}</span></p>
                     )}
+                    {(selectedNode.metadata?.ticker || selectedNode.metadata?.market) && (
+                      <p>
+                        {selectedNode.metadata?.ticker && <><span className="text-slate-400">종목: </span><span className="text-white">{String(selectedNode.metadata.ticker)}</span></>}
+                        {selectedNode.metadata?.ticker && selectedNode.metadata?.market && <span className="text-slate-600 mx-1">/</span>}
+                        {selectedNode.metadata?.market && <><span className="text-slate-400">시장: </span><span className="text-white">{String(selectedNode.metadata.market)}</span></>}
+                      </p>
+                    )}
+                    {(selectedNode.metadata?.directScore !== undefined || selectedNode.metadata?.propagatedScore !== undefined) && (
+                      <p>직접점수: <span className="text-white">{String(selectedNode.metadata.directScore ?? 0)}</span> / 전이점수: <span className="text-white">{String(selectedNode.metadata.propagatedScore ?? 0)}</span></p>
+                    )}
                   </>
                 )}
                 {selectedNode.nodeType === 'relatedCompany' && (
@@ -1026,6 +1043,19 @@ export default function SupplyChainXRay() {
                     <p>공급망/계열사 관계로 리스크가 전이될 수 있는 기업입니다.</p>
                     {selectedNode.metadata?.relation && (
                       <p>관계: <span className="text-white">{String(selectedNode.metadata.relation)}</span></p>
+                    )}
+                    {(selectedNode.metadata?.ticker || selectedNode.metadata?.market) && (
+                      <p>
+                        {selectedNode.metadata?.ticker && <><span className="text-slate-400">종목: </span><span className="text-white">{String(selectedNode.metadata.ticker)}</span></>}
+                        {selectedNode.metadata?.ticker && selectedNode.metadata?.market && <span className="text-slate-600 mx-1">/</span>}
+                        {selectedNode.metadata?.market && <><span className="text-slate-400">시장: </span><span className="text-white">{String(selectedNode.metadata.market)}</span></>}
+                      </p>
+                    )}
+                    {selectedNode.metadata?.tier && (
+                      <p>Tier: <span className="text-white">{String(selectedNode.metadata.tier)}</span> / 전이율: <span className="text-white">{String(Number(selectedNode.metadata.transferRate ?? 0) * 100)}%</span></p>
+                    )}
+                    {selectedNode.metadata?.directScore !== undefined && (
+                      <p>직접점수: <span className="text-white">{String(selectedNode.metadata.directScore)}</span></p>
                     )}
                   </>
                 )}
@@ -1037,6 +1067,51 @@ export default function SupplyChainXRay() {
                     )}
                     {selectedNode.metadata?.weightedScore && (
                       <p>가중점수: <span className="text-white">{String(selectedNode.metadata.weightedScore)}</span></p>
+                    )}
+                  </>
+                )}
+                {selectedNode.nodeType === 'riskEvent' && (
+                  <>
+                    {selectedNode.metadata?.fullTitle && (
+                      <p className="text-white font-medium mb-1">{String(selectedNode.metadata.fullTitle)}</p>
+                    )}
+                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                      {selectedNode.metadata?.type && (
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          selectedNode.metadata.type === 'NEWS' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                          : selectedNode.metadata.type === 'DISCLOSURE' ? 'bg-green-500/20 text-green-300 border border-green-500/30'
+                          : 'bg-orange-500/20 text-orange-300 border border-orange-500/30'
+                        }`}>
+                          {String(selectedNode.metadata.type)}
+                        </span>
+                      )}
+                      {selectedNode.metadata?.severity && (
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          selectedNode.metadata.severity === 'HIGH' || selectedNode.metadata.severity === 'CRITICAL'
+                            ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                            : selectedNode.metadata.severity === 'MEDIUM'
+                              ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30'
+                              : 'bg-slate-500/20 text-slate-300 border border-slate-500/30'
+                        }`}>
+                          {String(selectedNode.metadata.severity)}
+                        </span>
+                      )}
+                    </div>
+                    {selectedNode.metadata?.sourceName && (
+                      <p>출처: <span className="text-white">{String(selectedNode.metadata.sourceName)}</span></p>
+                    )}
+                    {selectedNode.metadata?.entityName && (
+                      <p>관련 엔티티: <span className="text-white">{String(selectedNode.metadata.entityName)}</span></p>
+                    )}
+                    {selectedNode.metadata?.sourceUrl && String(selectedNode.metadata.sourceUrl).length > 0 && (
+                      <a
+                        href={String(selectedNode.metadata.sourceUrl)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 mt-1 px-2 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[11px] font-medium hover:bg-blue-500/20 transition-colors"
+                      >
+                        &#128279; 원문보기
+                      </a>
                     )}
                   </>
                 )}
