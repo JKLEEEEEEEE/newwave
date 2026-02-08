@@ -3,7 +3,7 @@
  *
  * 구성:
  *   - 좌측: 로고 + "Supply Chain Risk Intelligence" 타이틀
- *   - 중앙: 4개 뷰 버튼 (Command Center, X-Ray, Deep Dive, War Room)
+ *   - 중앙: 4개 뷰 버튼 (Command Center, X-Ray, Deep Dive, What-If)
  *   - 우측: AI Copilot 토글 + 알림 아이콘
  *
  * 선택된 뷰는 gradient underline으로 하이라이트

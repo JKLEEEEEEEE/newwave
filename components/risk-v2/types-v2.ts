@@ -32,7 +32,7 @@ export type TrendV2 = 'UP' | 'DOWN' | 'STABLE';
 export type SeverityV2 = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 /** 화면 뷰 타입 */
-export type ViewType = 'command' | 'xray' | 'deepdive' | 'warroom';
+export type ViewType = 'command' | 'xray' | 'deepdive' | 'whatif';
 
 /** Entity 세부 타입 */
 export type EntityType = 'PERSON' | 'SHAREHOLDER' | 'CASE' | 'ISSUE';

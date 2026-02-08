@@ -108,7 +108,7 @@ export const NAV_ITEMS = [
   { id: 'command',  label: 'Command Center',     icon: '\uD83C\uDFAF' },
   { id: 'xray',     label: 'Supply Chain X-Ray', icon: '\uD83D\uDD2C' },
   { id: 'deepdive', label: 'Risk Deep Dive',     icon: '\uD83D\uDD0D' },
-  { id: 'warroom',  label: 'War Room',           icon: '\u2694\uFE0F' },
+  { id: 'whatif',    label: 'What-If',             icon: '\u2694\uFE0F' },
 ] as const;
 
 // ============================================

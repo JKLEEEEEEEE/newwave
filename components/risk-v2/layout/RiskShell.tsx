@@ -23,7 +23,7 @@ import type { ViewType } from '../types-v2';
 import CommandCenter from '../screens/CommandCenter';
 import SupplyChainXRay from '../screens/SupplyChainXRay';
 import RiskDeepDive from '../screens/RiskDeepDive';
-import WarRoom from '../screens/WarRoom';
+import WhatIf from '../screens/WhatIf';
 import AICopilotPanel from '../screens/AICopilotPanel';
 
 // ============================================
@@ -33,7 +33,7 @@ const VIEW_COMPONENTS: Record<ViewType, React.ComponentType> = {
   command: CommandCenter,
   xray: SupplyChainXRay,
   deepdive: RiskDeepDive,
-  warroom: WarRoom,
+  whatif: WhatIf,
 };
 
 // ============================================

@@ -1,5 +1,5 @@
 /**
- * WarRoom - Digital Twin 스트레스 테스트 "War Game" 화면
+ * WhatIf - Digital Twin 스트레스 테스트 What-If 시뮬레이션 화면
  * What-If 시나리오를 선택하면 모든 딜의 점수가 실시간으로 변하는 시뮬레이션
  *
  * 1. 시나리오 선택 패널 (3개 프리셋)
@@ -333,7 +333,7 @@ function AIInterpretationPanel({
     <GlassCard gradient="purple" className="p-5">
       <div className="flex items-center justify-between mb-4">
         <h4 className="text-white font-semibold text-lg">
-          AI War Game 분석
+          AI What-If 분석
         </h4>
       </div>
 
@@ -636,9 +636,9 @@ function CustomScenarioBuilder({
 }
 
 // ============================================
-// 메인 WarRoom 컴포넌트
+// 메인 WhatIf 컴포넌트
 // ============================================
-export default function WarRoom() {
+export default function WhatIf() {
   const { state } = useRiskV2();
   const { deals, dealDetail } = state;
 
@@ -696,7 +696,7 @@ export default function WarRoom() {
         setSimulationError('시뮬레이션 결과를 가져오지 못했습니다.');
       }
     } catch (err) {
-      console.error('[WarRoom] Simulation error:', err);
+      console.error('[WhatIf] Simulation error:', err);
       setSimulationError(
         err instanceof Error
           ? err.message
@@ -726,7 +726,7 @@ export default function WarRoom() {
         setSimulationError('커스텀 시뮬레이션 결과를 가져오지 못했습니다.');
       }
     } catch (err) {
-      console.error('[WarRoom] Custom simulation error:', err);
+      console.error('[WhatIf] Custom simulation error:', err);
       setSimulationError(
         err instanceof Error
           ? err.message
@@ -742,7 +742,7 @@ export default function WarRoom() {
       {/* 헤더 */}
       <div className="px-6 pt-6 pb-2">
         <h2 className="text-xl font-bold text-white">
-          War Room - 스트레스 테스트
+          What-If 시뮬레이션
         </h2>
         <p className="text-slate-400 text-sm mt-1">
           What-If 시나리오를 선택하고 실행하여 포트폴리오 영향을 분석합니다

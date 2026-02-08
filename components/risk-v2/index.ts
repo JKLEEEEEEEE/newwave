@@ -126,5 +126,5 @@ export { default as AnimatedNumber } from './shared/AnimatedNumber';
 export { default as CommandCenter } from './screens/CommandCenter';
 export { default as SupplyChainXRay } from './screens/SupplyChainXRay';
 export { default as RiskDeepDive } from './screens/RiskDeepDive';
-export { default as WarRoom } from './screens/WarRoom';
+export { default as WhatIf } from './screens/WhatIf';
 export { default as AICopilotPanel } from './screens/AICopilotPanel';
