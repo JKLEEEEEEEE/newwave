@@ -60,20 +60,29 @@ def get_deals():
     OPTIONAL MATCH (c)-[:HAS_CATEGORY]->(rc:RiskCategory)
     WITH d, c,
          collect({code: rc.code, name: rc.name, icon: rc.icon, score: rc.score}) AS categories
+    OPTIONAL MATCH (c)-[:HAS_CATEGORY]->(:RiskCategory)
+              -[:HAS_ENTITY]->(:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+    WHERE ev.score >= 80
+    WITH d, c, categories, count(DISTINCT ev) AS criticalEventCount
     RETURN c.name AS id, c.name AS name, c.sector AS sector,
            c.totalRiskScore AS score, c.riskLevel AS riskLevel,
-           categories
+           categories, criticalEventCount
     """
     results = client.execute_read(query, {})
 
     deals = []
     for r in results:
+        # CRITICAL 이벤트가 있으면 점수와 무관하게 CRITICAL
+        risk_level = r.get("riskLevel", "PASS") or "PASS"
+        if (r.get("criticalEventCount", 0) or 0) > 0:
+            risk_level = "CRITICAL"
+
         deals.append({
             "id": r["id"],
             "name": r["name"],
             "sector": r.get("sector", ""),
             "score": r.get("score", 0) or 0,
-            "riskLevel": r.get("riskLevel", "PASS") or "PASS",
+            "riskLevel": risk_level,
             "categories": [c for c in (r.get("categories") or []) if c.get("code")],
         })
 
@@ -172,6 +181,16 @@ def get_deal_detail(deal_id: str):
     if not base:
         raise HTTPException(status_code=404, detail=f"Deal not found: {deal_id}")
 
+    # CRITICAL 이벤트 존재 여부 확인 → riskLevel 오버라이드
+    crit_query = """
+    MATCH (c:Company {name: $dealId})-[:HAS_CATEGORY]->(:RiskCategory)
+          -[:HAS_ENTITY]->(:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+    WHERE ev.score >= 80
+    RETURN count(ev) AS cnt
+    """
+    crit_result = client.execute_read_single(crit_query, {"dealId": deal_id})
+    has_critical_events = (crit_result.get("cnt", 0) or 0) > 0 if crit_result else False
+
     # 카테고리 조회
     category_service = CategoryService(client)
     categories_raw = category_service.get_categories_by_company(deal_id)
@@ -260,7 +279,7 @@ def get_deal_detail(deal_id: str):
             name=base["name"],
             sector=base.get("sector", ""),
             score=base.get("score", 0) or 0,
-            riskLevel=base.get("riskLevel", "PASS") or "PASS",
+            riskLevel="CRITICAL" if has_critical_events else (base.get("riskLevel", "PASS") or "PASS"),
             breakdown=ScoreBreakdown(
                 direct=base.get("directScore", 0) or 0,
                 propagated=base.get("propagatedScore", 0) or 0,

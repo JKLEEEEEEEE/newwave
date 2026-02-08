@@ -357,8 +357,10 @@ export interface RiskV2State {
   dealDetailLoading: boolean;
   /** 최근 이벤트 캐시 */
   recentEvents: RiskEventV2[];
-  /** 미확인 CRITICAL 이벤트 목록 */
+  /** CRITICAL 이벤트 목록 (전체 딜 대상, API에서 독립 조회) */
   criticalAlerts: TriagedEventV2[];
+  /** CRITICAL 알림 확인 여부 (애니메이션 제어용) */
+  criticalAcknowledged: boolean;
 }
 
 /** 상태 액션 타입 */
@@ -380,8 +382,8 @@ export type RiskV2Action =
   | { type: 'SET_DEAL_DETAIL'; payload: DealDetailResponseV2 | null }
   | { type: 'SET_DEAL_DETAIL_LOADING'; payload: boolean }
   | { type: 'SET_RECENT_EVENTS'; payload: RiskEventV2[] }
-  | { type: 'ADD_CRITICAL_ALERTS'; payload: TriagedEventV2[] }
-  | { type: 'DISMISS_CRITICAL_ALERTS' };
+  | { type: 'SET_CRITICAL_ALERTS'; payload: TriagedEventV2[] }
+  | { type: 'ACKNOWLEDGE_CRITICAL_ALERTS' };
 
 // ============================================
 // AI Briefing 타입

@@ -21,7 +21,13 @@ class ScoreService:
         propagated_score = self._calculate_propagated_score(company_id)
         critical_boost = self._calculate_critical_boost(company_id)
         total_score = min(100, direct_score + propagated_score + critical_boost)
-        risk_level = self._determine_status(total_score)
+
+        # CRITICAL 이벤트가 있으면 점수와 무관하게 CRITICAL (부도/회생/파산 등 즉시 심각)
+        if critical_boost > 0:
+            risk_level = "CRITICAL"
+        else:
+            risk_level = self._determine_status(total_score)
+
         trend = self._calculate_trend(company_id, total_score)
 
         self._update_company_score(

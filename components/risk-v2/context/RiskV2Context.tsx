@@ -42,6 +42,7 @@ const initialState: RiskV2State = {
   dealDetailLoading: false,
   recentEvents: [],
   criticalAlerts: [],
+  criticalAcknowledged: false,
 };
 
 // ============================================
@@ -146,14 +147,19 @@ function riskV2Reducer(state: RiskV2State, action: RiskV2Action): RiskV2State {
     case 'SET_RECENT_EVENTS':
       return { ...state, recentEvents: action.payload };
 
-    case 'ADD_CRITICAL_ALERTS': {
-      const existingIds = new Set(state.criticalAlerts.map(e => e.id));
-      const newAlerts = action.payload.filter(e => !existingIds.has(e.id));
-      return { ...state, criticalAlerts: [...state.criticalAlerts, ...newAlerts] };
+    case 'SET_CRITICAL_ALERTS': {
+      // 새 이벤트가 추가되면 acknowledged 리셋
+      const prevIds = new Set(state.criticalAlerts.map(e => e.id));
+      const hasNew = action.payload.some(e => !prevIds.has(e.id));
+      return {
+        ...state,
+        criticalAlerts: action.payload,
+        criticalAcknowledged: hasNew ? false : state.criticalAcknowledged,
+      };
     }
 
-    case 'DISMISS_CRITICAL_ALERTS':
-      return { ...state, criticalAlerts: [] };
+    case 'ACKNOWLEDGE_CRITICAL_ALERTS':
+      return { ...state, criticalAcknowledged: true };
 
     default:
       return state;
@@ -176,8 +182,7 @@ interface RiskV2ContextType {
   toggleCopilot: () => void;
   setCopilotContext: (ctx: CopilotContextData | null) => void;
   navigateBack: (to: 'deals' | 'company' | 'category') => void;
-  addCriticalAlerts: (alerts: TriagedEventV2[]) => void;
-  dismissCriticalAlerts: () => void;
+  acknowledgeCriticalAlerts: () => void;
   loadDeals: () => Promise<void>;
   loadDealDetail: (dealId: string) => Promise<void>;
 
@@ -248,12 +253,8 @@ export function RiskV2Provider({
     dispatch({ type: 'NAVIGATE_BACK_TO', payload: to });
   }, []);
 
-  const addCriticalAlerts = useCallback((alerts: TriagedEventV2[]) => {
-    dispatch({ type: 'ADD_CRITICAL_ALERTS', payload: alerts });
-  }, []);
-
-  const dismissCriticalAlerts = useCallback(() => {
-    dispatch({ type: 'DISMISS_CRITICAL_ALERTS' });
+  const acknowledgeCriticalAlerts = useCallback(() => {
+    dispatch({ type: 'ACKNOWLEDGE_CRITICAL_ALERTS' });
   }, []);
 
   /** 딜 목록 로드 */
@@ -310,9 +311,8 @@ export function RiskV2Provider({
     loadDeals();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // CRITICAL 알림 독립 폴링 (전체 딜 대상)
-  const seenCriticalIdsRef = useRef<Set<string>>(new Set());
-  const criticalInitializedRef = useRef(false);
+  // CRITICAL 알림 독립 폴링 (전체 딜 대상, 항상 최신 상태 유지)
+  const prevAlertCountRef = useRef(0);
   useEffect(() => {
     let cancelled = false;
     const fetchAlerts = async () => {
@@ -320,21 +320,13 @@ export function RiskV2Provider({
         const res = await riskApiV2.fetchCriticalAlerts();
         if (cancelled || !res.success) return;
         const alerts = res.data || [];
-        if (!criticalInitializedRef.current) {
-          // 첫 로드: 기존 이벤트를 seen으로 등록하고 모두 표시
-          criticalInitializedRef.current = true;
-          alerts.forEach(a => seenCriticalIdsRef.current.add(a.id));
-          if (alerts.length > 0) {
-            dispatch({ type: 'ADD_CRITICAL_ALERTS', payload: alerts });
-          }
-          return;
+        // 항상 최신 API 결과로 교체
+        dispatch({ type: 'SET_CRITICAL_ALERTS', payload: alerts });
+        // 새 알림이 추가되면 acknowledged 리셋 (다시 삐용삐용)
+        if (alerts.length > prevAlertCountRef.current) {
+          dispatch({ type: 'SET_CRITICAL_ALERTS', payload: alerts });
         }
-        // 이후: 새로운 이벤트만 추가
-        const newAlerts = alerts.filter(a => !seenCriticalIdsRef.current.has(a.id));
-        if (newAlerts.length > 0) {
-          dispatch({ type: 'ADD_CRITICAL_ALERTS', payload: newAlerts });
-        }
-        alerts.forEach(a => seenCriticalIdsRef.current.add(a.id));
+        prevAlertCountRef.current = alerts.length;
       } catch (err) {
         console.error('[RiskV2] CRITICAL 알림 조회 에러:', err);
       }
@@ -388,8 +380,7 @@ export function RiskV2Provider({
     toggleCopilot,
     setCopilotContext,
     navigateBack,
-    addCriticalAlerts,
-    dismissCriticalAlerts,
+    acknowledgeCriticalAlerts,
     loadDeals,
     loadDealDetail,
     currentDeal,

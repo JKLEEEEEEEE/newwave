@@ -4,7 +4,7 @@
  * 구성:
  *   - 좌측: 로고 + "Supply Chain Risk Intelligence" 타이틀
  *   - 중앙: 4개 뷰 버튼 (Command Center, X-Ray, Deep Dive, What-If)
- *   - 우측: AI Copilot 토글 + 알림 아이콘
+ *   - 우측: CRITICAL 알림 버튼 + AI Copilot 토글
  *
  * 선택된 뷰는 gradient underline으로 하이라이트
  */
@@ -16,8 +16,8 @@ import { formatRelativeTime } from '../utils-v2';
 import type { ViewType } from '../types-v2';
 
 export default function NavigationBar() {
-  const { state, setActiveView, toggleCopilot, dismissCriticalAlerts } = useRiskV2();
-  const { activeView, copilotOpen, criticalAlerts } = state;
+  const { state, setActiveView, toggleCopilot, acknowledgeCriticalAlerts } = useRiskV2();
+  const { activeView, copilotOpen, criticalAlerts, criticalAcknowledged } = state;
 
   // CRITICAL 알림 드롭다운 상태
   const [alertDropdownOpen, setAlertDropdownOpen] = useState(false);
@@ -101,14 +101,15 @@ export default function NavigationBar() {
 
       {/* === 우측: CRITICAL 알림 + Copilot === */}
       <div className="flex items-center gap-3 min-w-[260px] justify-end">
-        {/* CRITICAL 알림 버튼 */}
+        {/* CRITICAL 알림 버튼 — alerts > 0이면 항상 표시 */}
         {criticalAlerts.length > 0 && (
           <div className="relative" ref={alertDropdownRef}>
             <button
               onClick={() => setAlertDropdownOpen(prev => !prev)}
-              className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium
+              className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium
                          border border-red-500/30 bg-red-500/10 hover:bg-red-500/20
-                         transition-all duration-200 ease-out animate-bounce"
+                         transition-all duration-200 ease-out
+                         ${!criticalAcknowledged ? 'animate-bounce' : ''}`}
               title="CRITICAL Alerts"
             >
               {/* 경고 아이콘 */}
@@ -117,11 +118,13 @@ export default function NavigationBar() {
                       d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
               <span className="text-red-400 font-bold text-xs">{criticalAlerts.length}</span>
-              {/* ping 뱃지 */}
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
-              </span>
+              {/* ping 뱃지 — 미확인 시에만 */}
+              {!criticalAcknowledged && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+                </span>
+              )}
             </button>
 
             {/* 드롭다운 패널 */}
@@ -155,15 +158,17 @@ export default function NavigationBar() {
                   ))}
                 </div>
 
-                {/* 하단: 확인 버튼 */}
-                <div className="px-4 py-3 border-t border-white/5">
-                  <button
-                    onClick={() => { dismissCriticalAlerts(); setAlertDropdownOpen(false); }}
-                    className="w-full py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
-                  >
-                    모두 확인 ({criticalAlerts.length}건)
-                  </button>
-                </div>
+                {/* 하단: 확인 버튼 (애니메이션 멈춤, 알림은 유지) */}
+                {!criticalAcknowledged && (
+                  <div className="px-4 py-3 border-t border-white/5">
+                    <button
+                      onClick={() => { acknowledgeCriticalAlerts(); }}
+                      className="w-full py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
+                    >
+                      확인 ({criticalAlerts.length}건)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
