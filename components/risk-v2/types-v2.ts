@@ -443,6 +443,8 @@ export interface TriagedEventV2 extends RiskEventV2 {
   categoryCode?: string;
   /** 연관 카테고리 이름 */
   categoryName?: string;
+  /** 연관 기업명 */
+  companyName?: string;
 }
 
 // ============================================

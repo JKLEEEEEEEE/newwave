@@ -147,6 +147,7 @@ export default function NavigationBar() {
                       <p className="text-sm text-white font-medium">{event.title}</p>
                       <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
                         <span>Score: {event.score}</span>
+                        {event.companyName && <span className="text-slate-300">{event.companyName}</span>}
                         {event.categoryName && <span>{event.categoryName}</span>}
                         <span>{formatRelativeTime(event.publishedAt)}</span>
                       </div>

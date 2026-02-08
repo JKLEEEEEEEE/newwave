@@ -1133,6 +1133,100 @@ def get_deal_briefing(deal_id: str):
 
 
 # =============================================================================
+# Global Critical Alerts API
+# =============================================================================
+
+@router.get("/alerts/critical")
+def get_critical_alerts(limit: int = 50):
+    """전체 딜 대상 CRITICAL 이벤트 조회 (네비게이션 바 알림용)"""
+    client = get_client()
+
+    # 모든 딜의 메인기업 + 관련기업에서 고위험 이벤트 조회
+    query = """
+    MATCH (d:Deal)-[:TARGET]->(c:Company)-[:HAS_CATEGORY]->(rc:RiskCategory)
+          -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+    WHERE ev.score >= 60
+    RETURN ev.id AS id, ev.title AS title, ev.summary AS summary,
+           ev.type AS type, ev.score AS score, ev.severity AS severity,
+           ev.sourceName AS sourceName, ev.sourceUrl AS sourceUrl,
+           coalesce(toString(ev.publishedAt), toString(ev.createdAt), '') AS publishedAt,
+           rc.code AS categoryCode, rc.name AS categoryName,
+           re.name AS entityName, c.name AS companyName
+    UNION
+    MATCH (d:Deal)-[:TARGET]->(c:Company)-[:HAS_RELATED]->(rel:Company)
+          -[:HAS_CATEGORY]->(rc:RiskCategory)
+          -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+    WHERE ev.score >= 60
+    RETURN ev.id AS id, ev.title AS title, ev.summary AS summary,
+           ev.type AS type, ev.score AS score, ev.severity AS severity,
+           ev.sourceName AS sourceName, ev.sourceUrl AS sourceUrl,
+           coalesce(toString(ev.publishedAt), toString(ev.createdAt), '') AS publishedAt,
+           rc.code AS categoryCode, rc.name AS categoryName,
+           re.name AS entityName, rel.name AS companyName
+    ORDER BY score DESC
+    LIMIT $limit
+    """
+    events_raw = client.execute_read(query, {"limit": limit}) or []
+
+    # 트리아지 점수 계산 + CRITICAL 필터
+    alerts = []
+    seen_ids = set()
+    for e in events_raw:
+        evt_id = e.get("id", "")
+        if not evt_id or evt_id in seen_ids:
+            continue
+        seen_ids.add(evt_id)
+
+        severity_str = e.get("severity") or "MEDIUM"
+        source_name = e.get("sourceName") or ""
+        published_at = e.get("publishedAt") or ""
+
+        severity_score = SEVERITY_SCORE_MAP.get(severity_str, 50)
+        urgency = _calc_urgency(published_at)
+        tier, reliability = _classify_source(source_name)
+        confidence = int(reliability * 100)
+        triage_score = round(severity_score * 0.4 + urgency * 0.3 + confidence * 0.3, 1)
+        triage_level = _calc_triage_level(triage_score)
+
+        # CRITICAL 레벨이거나 원점수 80 이상만
+        if triage_level != "CRITICAL" and (e.get("score", 0) or 0) < 80:
+            continue
+
+        alerts.append({
+            "id": evt_id,
+            "entityId": e.get("entityName", ""),
+            "title": e.get("title", ""),
+            "summary": e.get("summary") or "",
+            "type": e.get("type") or "NEWS",
+            "score": e.get("score", 0) or 0,
+            "severity": severity_str,
+            "sourceName": source_name,
+            "sourceUrl": e.get("sourceUrl") or "",
+            "publishedAt": published_at,
+            "urgency": urgency,
+            "confidence": confidence,
+            "triageScore": triage_score,
+            "triageLevel": triage_level,
+            "sourceTier": tier,
+            "sourceReliability": reliability,
+            "hasConflict": False,
+            "playbook": PLAYBOOK_MAP.get(e.get("categoryCode") or "OTHER", PLAYBOOK_MAP["OTHER"]),
+            "categoryCode": e.get("categoryCode") or "OTHER",
+            "categoryName": e.get("categoryName") or "",
+            "companyName": e.get("companyName") or "",
+        })
+
+    alerts.sort(key=lambda x: x["triageScore"], reverse=True)
+
+    return {
+        "schemaVersion": "v4",
+        "generatedAt": datetime.now().isoformat(),
+        "alerts": alerts,
+        "count": len(alerts),
+    }
+
+
+# =============================================================================
 # Triaged Events API (Smart Triage + Source Transparency)
 # =============================================================================
 

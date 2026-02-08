@@ -9,7 +9,7 @@
  *   - NAVIGATE_BACK_TO: 지정 수준 이하 초기화
  */
 
-import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useEffect, useMemo, useRef } from 'react';
 import type {
   RiskV2State,
   RiskV2Action,
@@ -308,6 +308,41 @@ export function RiskV2Provider({
   // 마운트 시 딜 목록 로드
   useEffect(() => {
     loadDeals();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // CRITICAL 알림 독립 폴링 (전체 딜 대상)
+  const seenCriticalIdsRef = useRef<Set<string>>(new Set());
+  const criticalInitializedRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchAlerts = async () => {
+      try {
+        const res = await riskApiV2.fetchCriticalAlerts();
+        if (cancelled || !res.success) return;
+        const alerts = res.data || [];
+        if (!criticalInitializedRef.current) {
+          // 첫 로드: 기존 이벤트를 seen으로 등록하고 모두 표시
+          criticalInitializedRef.current = true;
+          alerts.forEach(a => seenCriticalIdsRef.current.add(a.id));
+          if (alerts.length > 0) {
+            dispatch({ type: 'ADD_CRITICAL_ALERTS', payload: alerts });
+          }
+          return;
+        }
+        // 이후: 새로운 이벤트만 추가
+        const newAlerts = alerts.filter(a => !seenCriticalIdsRef.current.has(a.id));
+        if (newAlerts.length > 0) {
+          dispatch({ type: 'ADD_CRITICAL_ALERTS', payload: newAlerts });
+        }
+        alerts.forEach(a => seenCriticalIdsRef.current.add(a.id));
+      } catch (err) {
+        console.error('[RiskV2] CRITICAL 알림 조회 에러:', err);
+      }
+    };
+
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 30000); // 30초 폴링
+    return () => { cancelled = true; clearInterval(interval); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // selectedDealId 변경 시 딜 상세 자동 로드

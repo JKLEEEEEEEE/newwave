@@ -136,7 +136,7 @@ const CASE_STATUS_COLORS: Record<string, { color: string; label: string }> = {
 // 메인 컴포넌트
 // ============================================
 export default function CommandCenter() {
-  const { state, selectDeal, selectCategory, setActiveView, currentDeal, currentCompany, currentCategories, loadDeals, addCriticalAlerts } = useRiskV2();
+  const { state, selectDeal, selectCategory, setActiveView, currentDeal, currentCompany, currentCategories, loadDeals } = useRiskV2();
   const { selectedDealId, deals, dealsLoading, dealDetail, dealDetailLoading } = state;
 
   // --- Live Feed 상태 ---
@@ -151,9 +151,6 @@ export default function CommandCenter() {
   const [triageFilter, setTriageFilter] = useState<string>('ALL');
   const [selectedTriageEvent, setSelectedTriageEvent] = useState<TriagedEventV2 | null>(null);
   const [showFullView, setShowFullView] = useState(false);
-
-  // --- CRITICAL 알림: Context dispatch 방식 ---
-  const seenCriticalIdsRef = useRef<Set<string>>(new Set());
 
   // --- Case Management 상태 ---
   const [cases, setCases] = useState<CaseV2[]>([]);
@@ -295,24 +292,6 @@ export default function CommandCenter() {
     medium: triagedEvents.filter(e => e.triageLevel === 'MEDIUM').length,
     low: triagedEvents.filter(e => e.triageLevel === 'LOW').length,
   }), [triagedEvents]);
-
-  // --- CRITICAL 이벤트 감지 → Context dispatch ---
-  useEffect(() => {
-    if (triagedEvents.length === 0) return;
-    // 첫 로드 시 모든 기존 이벤트를 seen으로 등록
-    if (seenCriticalIdsRef.current.size === 0) {
-      triagedEvents.forEach(e => seenCriticalIdsRef.current.add(e.id));
-      return;
-    }
-    const newCriticals = triagedEvents.filter(
-      e => (e.triageLevel === 'CRITICAL' || e.score >= 80)
-        && !seenCriticalIdsRef.current.has(e.id)
-    );
-    if (newCriticals.length > 0) {
-      addCriticalAlerts(newCriticals);
-    }
-    triagedEvents.forEach(e => seenCriticalIdsRef.current.add(e.id));
-  }, [triagedEvents, addCriticalAlerts]);
 
   // --- Case 생성 핸들러 ---
   const handleCreateCase = useCallback(async (event: TriagedEventV2) => {

@@ -859,6 +859,42 @@ async function fetchTriagedEventsV2(dealId: string, limit = 30): Promise<ApiResp
 }
 
 // ============================================
+// Global Critical Alerts API
+// ============================================
+
+/** 전체 딜 대상 CRITICAL 이벤트 독립 조회 (네비바 알림용) */
+async function fetchCriticalAlertsV2(): Promise<ApiResponseV2<TriagedEventV2[]>> {
+  const res = await fetchApi<any>('/api/v4/alerts/critical');
+  if (res.success && res.data?.alerts) {
+    const alerts: TriagedEventV2[] = res.data.alerts.map((e: any) => ({
+      id: e.id || '',
+      entityId: e.entityId || '',
+      title: e.title || '',
+      summary: e.summary || '',
+      type: (e.type as EventType) || 'NEWS',
+      score: e.score || 0,
+      severity: (e.severity as SeverityV2) || 'MEDIUM',
+      sourceName: e.sourceName || '',
+      sourceUrl: e.sourceUrl || '',
+      publishedAt: e.publishedAt || '',
+      urgency: e.urgency || 0,
+      confidence: e.confidence || 0,
+      triageScore: e.triageScore || 0,
+      triageLevel: (e.triageLevel || 'CRITICAL') as TriageLevel,
+      sourceTier: (e.sourceTier || 'COMMUNITY') as SourceTier,
+      sourceReliability: e.sourceReliability || 0,
+      hasConflict: e.hasConflict || false,
+      playbook: e.playbook || [],
+      categoryCode: e.categoryCode || '',
+      categoryName: e.categoryName || '',
+      companyName: e.companyName || '',
+    }));
+    return success(alerts);
+  }
+  return success([] as TriagedEventV2[]);
+}
+
+// ============================================
 // Case Management API
 // ============================================
 
@@ -973,6 +1009,8 @@ export const riskApiV2 = {
   fetchBriefing: fetchBriefingV2,
   // Live Events (Smart Triage)
   fetchTriagedEvents: fetchTriagedEventsV2,
+  // Critical Alerts (Global)
+  fetchCriticalAlerts: fetchCriticalAlertsV2,
   // Case Management
   fetchCases: fetchCasesV2,
   createCase: createCaseV2,
