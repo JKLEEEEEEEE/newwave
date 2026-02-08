@@ -536,7 +536,7 @@ export default function AICopilotPanel() {
                   <div className="flex items-center gap-2">
                     <h4 className="text-sm font-bold text-white">{briefing.company}</h4>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                      briefing.riskLevel === 'FAIL' ? 'bg-red-500 text-white' :
+                      briefing.riskLevel === 'CRITICAL' ? 'bg-red-500 text-white' :
                       briefing.riskLevel === 'WARNING' ? 'bg-amber-500 text-white' :
                       'bg-green-500 text-white'
                     }`}>

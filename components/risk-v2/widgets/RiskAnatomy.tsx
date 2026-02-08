@@ -23,7 +23,7 @@ interface RiskAnatomyProps {
   className?: string;
 }
 
-type RiskLevelKey = 'PASS' | 'WARNING' | 'FAIL';
+type RiskLevelKey = 'PASS' | 'WARNING' | 'CRITICAL';
 
 const ENTITY_ICONS: Record<string, string> = {
   PERSON: '\uD83D\uDC64',
@@ -33,12 +33,12 @@ const ENTITY_ICONS: Record<string, string> = {
 };
 
 const getRiskLevel = (score: number): RiskLevelKey =>
-  score >= 70 ? 'FAIL' : score >= 40 ? 'WARNING' : 'PASS';
+  score >= 50 ? 'CRITICAL' : score >= 30 ? 'WARNING' : 'PASS';
 
 const IMPACT_LABELS: Record<RiskLevelKey, string> = {
   PASS: 'Low Impact',
   WARNING: 'Medium Impact',
-  FAIL: 'High Impact',
+  CRITICAL: 'High Impact',
 };
 
 // ============================================

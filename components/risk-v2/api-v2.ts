@@ -108,7 +108,7 @@ function cleanAnswer(raw: string): string {
 
 /** 리스크 레벨 판정 */
 function determineRiskLevel(score: number): RiskLevelV2 {
-  if (score >= 50) return 'FAIL';
+  if (score >= 50) return 'CRITICAL';
   if (score >= 30) return 'WARNING';
   return 'PASS';
 }
@@ -450,7 +450,7 @@ async function fetchCompanyGraphV2(dealId: string): Promise<ApiResponseV2<GraphD
 
     // Category nodes (score > 0)
     for (const cat of categories.filter(c => c.score > 0)) {
-      const catLevel = cat.weightedScore >= 15 ? 'FAIL' : cat.weightedScore >= 5 ? 'WARNING' : 'PASS';
+      const catLevel = cat.weightedScore >= 15 ? 'CRITICAL' : cat.weightedScore >= 5 ? 'WARNING' : 'PASS';
       nodes.push({
         id: cat.id,
         name: cat.name,

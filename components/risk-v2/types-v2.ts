@@ -23,7 +23,7 @@ export type CategoryCodeV2 =
   | 'OTHER';  // 기타
 
 /** 리스크 레벨 (3단계) */
-export type RiskLevelV2 = 'PASS' | 'WARNING' | 'FAIL';
+export type RiskLevelV2 = 'PASS' | 'WARNING' | 'CRITICAL';
 
 /** 추세 방향 */
 export type TrendV2 = 'UP' | 'DOWN' | 'STABLE';
@@ -357,6 +357,8 @@ export interface RiskV2State {
   dealDetailLoading: boolean;
   /** 최근 이벤트 캐시 */
   recentEvents: RiskEventV2[];
+  /** 미확인 CRITICAL 이벤트 목록 */
+  criticalAlerts: TriagedEventV2[];
 }
 
 /** 상태 액션 타입 */
@@ -377,7 +379,9 @@ export type RiskV2Action =
   | { type: 'NAVIGATE_BACK_TO'; payload: 'deals' | 'company' | 'category' }
   | { type: 'SET_DEAL_DETAIL'; payload: DealDetailResponseV2 | null }
   | { type: 'SET_DEAL_DETAIL_LOADING'; payload: boolean }
-  | { type: 'SET_RECENT_EVENTS'; payload: RiskEventV2[] };
+  | { type: 'SET_RECENT_EVENTS'; payload: RiskEventV2[] }
+  | { type: 'ADD_CRITICAL_ALERTS'; payload: TriagedEventV2[] }
+  | { type: 'DISMISS_CRITICAL_ALERTS' };
 
 // ============================================
 // AI Briefing 타입

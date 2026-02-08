@@ -41,7 +41,7 @@ export const GRADIENTS = {
 } as const;
 
 // ============================================
-// 리스크 레벨 색상 (PASS / WARNING / FAIL)
+// 리스크 레벨 색상 (PASS / WARNING / CRITICAL)
 // ============================================
 export const RISK_COLORS = {
   PASS: {
@@ -56,7 +56,7 @@ export const RISK_COLORS = {
     bg: 'rgba(245, 158, 11, 0.1)',
     border: 'rgba(245, 158, 11, 0.3)',
   },
-  FAIL: {
+  CRITICAL: {
     primary: '#ef4444',
     light: '#f87171',
     bg: 'rgba(239, 68, 68, 0.1)',

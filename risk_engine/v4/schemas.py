@@ -27,7 +27,7 @@ CATEGORY_CONFIG = {
 }
 
 CategoryCode = Literal["SHARE", "EXEC", "CREDIT", "LEGAL", "GOV", "OPS", "AUDIT", "ESG", "SUPPLY", "OTHER"]
-RiskLevel = Literal["PASS", "WARNING", "FAIL"]
+RiskLevel = Literal["PASS", "WARNING", "CRITICAL"]
 Trend = Literal["UP", "DOWN", "STABLE"]
 Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 

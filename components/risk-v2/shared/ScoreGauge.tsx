@@ -25,11 +25,10 @@ interface ScoreGaugeProps {
   className?: string;
 }
 
-/** 점수에 따른 색상 결정 */
-function getGaugeColor(score: number, maxScore: number): string {
-  const ratio = score / maxScore;
-  if (ratio >= 0.75) return RISK_COLORS.FAIL.primary;
-  if (ratio >= 0.50) return RISK_COLORS.WARNING.primary;
+/** 점수에 따른 색상 결정 (getScoreLevel 기준: 50/30) */
+function getGaugeColor(score: number, _maxScore: number): string {
+  if (score >= 50) return RISK_COLORS.CRITICAL.primary;
+  if (score >= 30) return RISK_COLORS.WARNING.primary;
   return RISK_COLORS.PASS.primary;
 }
 

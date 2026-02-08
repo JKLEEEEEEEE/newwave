@@ -9,14 +9,31 @@
  * 선택된 뷰는 gradient underline으로 하이라이트
  */
 
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { NAV_ITEMS, GLASS, GRADIENTS, LAYOUT } from '../design-tokens';
 import { useRiskV2 } from '../context/RiskV2Context';
+import { formatRelativeTime } from '../utils-v2';
 import type { ViewType } from '../types-v2';
 
 export default function NavigationBar() {
-  const { state, setActiveView, toggleCopilot } = useRiskV2();
-  const { activeView, copilotOpen } = state;
+  const { state, setActiveView, toggleCopilot, dismissCriticalAlerts } = useRiskV2();
+  const { activeView, copilotOpen, criticalAlerts } = state;
+
+  // CRITICAL 알림 드롭다운 상태
+  const [alertDropdownOpen, setAlertDropdownOpen] = useState(false);
+  const alertDropdownRef = useRef<HTMLDivElement>(null);
+
+  // 외부 클릭 시 드롭다운 닫기
+  useEffect(() => {
+    if (!alertDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (alertDropdownRef.current && !alertDropdownRef.current.contains(e.target as Node)) {
+        setAlertDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [alertDropdownOpen]);
 
   return (
     <nav
@@ -82,29 +99,74 @@ export default function NavigationBar() {
         })}
       </div>
 
-      {/* === 우측: Copilot + 알림 === */}
+      {/* === 우측: CRITICAL 알림 + Copilot === */}
       <div className="flex items-center gap-3 min-w-[260px] justify-end">
-        {/* 알림 아이콘 */}
-        <button
-          className="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-          title="알림"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
-            />
-          </svg>
-          {/* 알림 뱃지 (미래 구현) */}
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-        </button>
+        {/* CRITICAL 알림 버튼 */}
+        {criticalAlerts.length > 0 && (
+          <div className="relative" ref={alertDropdownRef}>
+            <button
+              onClick={() => setAlertDropdownOpen(prev => !prev)}
+              className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium
+                         border border-red-500/30 bg-red-500/10 hover:bg-red-500/20
+                         transition-all duration-200 ease-out animate-bounce"
+              title="CRITICAL Alerts"
+            >
+              {/* 경고 아이콘 */}
+              <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <span className="text-red-400 font-bold text-xs">{criticalAlerts.length}</span>
+              {/* ping 뱃지 */}
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+              </span>
+            </button>
+
+            {/* 드롭다운 패널 */}
+            {alertDropdownOpen && (
+              <div className="absolute top-full right-0 mt-2 w-[360px] bg-slate-900/95 backdrop-blur-xl
+                              border border-red-500/30 rounded-xl shadow-2xl shadow-red-500/10 z-50">
+                {/* 헤더 */}
+                <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
+                  <span className="text-sm font-bold text-red-400">CRITICAL ALERTS ({criticalAlerts.length})</span>
+                  <button
+                    onClick={() => setAlertDropdownOpen(false)}
+                    className="text-slate-400 hover:text-white transition-colors text-sm"
+                  >
+                    &#10005;
+                  </button>
+                </div>
+
+                {/* 이벤트 리스트 */}
+                <div className="max-h-[300px] overflow-y-auto p-2 space-y-1.5"
+                     style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(148,163,184,0.2) transparent' }}>
+                  {criticalAlerts.map(event => (
+                    <div key={event.id} className="p-2.5 rounded-lg bg-red-500/5 border border-red-500/10">
+                      <p className="text-sm text-white font-medium">{event.title}</p>
+                      <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-400">
+                        <span>Score: {event.score}</span>
+                        {event.categoryName && <span>{event.categoryName}</span>}
+                        <span>{formatRelativeTime(event.publishedAt)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 하단: 확인 버튼 */}
+                <div className="px-4 py-3 border-t border-white/5">
+                  <button
+                    onClick={() => { dismissCriticalAlerts(); setAlertDropdownOpen(false); }}
+                    className="w-full py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
+                  >
+                    모두 확인 ({criticalAlerts.length}건)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* AI Copilot 토글 */}
         <button

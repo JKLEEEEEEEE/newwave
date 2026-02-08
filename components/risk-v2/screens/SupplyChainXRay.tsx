@@ -379,7 +379,7 @@ export default function SupplyChainXRay() {
       : node.nodeType === 'riskEntity' ? '리스크 엔티티'
       : node.nodeType === 'riskEvent' ? '리스크 이벤트'
       : 'Deal';
-    const levelColor = node.riskLevel === 'FAIL' ? '#ef4444'
+    const levelColor = node.riskLevel === 'CRITICAL' ? '#ef4444'
       : node.riskLevel === 'WARNING' ? '#eab308'
       : '#22c55e';
     return `<div style="background:rgba(15,23,42,0.95);padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);min-width:160px">

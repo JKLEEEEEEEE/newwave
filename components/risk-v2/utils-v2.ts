@@ -11,9 +11,9 @@ import { CATEGORY_DEFINITIONS_V2 } from './category-definitions';
 // 점수 → 리스크 레벨 변환
 // ============================================
 
-/** 점수를 리스크 레벨로 변환 (V5 기준: 50이상 FAIL, 30이상 WARNING, 나머지 PASS) */
+/** 점수를 리스크 레벨로 변환 (V5 기준: 50이상 CRITICAL, 30이상 WARNING, 나머지 PASS) */
 export function getScoreLevel(score: number): RiskLevelV2 {
-  if (score >= 50) return 'FAIL';
+  if (score >= 50) return 'CRITICAL';
   if (score >= 30) return 'WARNING';
   return 'PASS';
 }
@@ -44,7 +44,7 @@ export function getLevelClasses(level: RiskLevelV2): {
         border: 'border-amber-500/30',
         ring: 'ring-amber-500/30',
       };
-    case 'FAIL':
+    case 'CRITICAL':
       return {
         text: 'text-red-400',
         bg: 'bg-red-500/10',

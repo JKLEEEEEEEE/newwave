@@ -96,8 +96,8 @@ function getConfidenceColor(c: number): string {
   return 'text-red-400';
 }
 
-function toRiskLevel(level?: string): 'PASS' | 'WARNING' | 'FAIL' {
-  if (level === 'FAIL' || level === 'WARNING' || level === 'PASS') return level;
+function toRiskLevel(level?: string): 'PASS' | 'WARNING' | 'CRITICAL' {
+  if (level === 'CRITICAL' || level === 'WARNING' || level === 'PASS') return level;
   return 'PASS';
 }
 
@@ -113,9 +113,9 @@ function fmtDelta(v?: number): { text: string; cls: string } | null {
 function highlightKeywords(text: string): React.ReactNode {
   if (!text) return null;
   const splitPat =
-    /(위험|리스크|소송|법률|특허|규제|제재|배상|벌금|부채|적자|하락|급락|파산|부도|횡령|배임|분식|감사의견|상폐|불성실|제소|피소|손실|취약|심각|최고|가장 높|주의|경고|임계|FAIL|CRITICAL|HIGH)/;
+    /(위험|리스크|소송|법률|특허|규제|제재|배상|벌금|부채|적자|하락|급락|파산|부도|횡령|배임|분식|감사의견|상폐|불성실|제소|피소|손실|취약|심각|최고|가장 높|주의|경고|임계|CRITICAL|HIGH)/;
   const testPat =
-    /^(위험|리스크|소송|법률|특허|규제|제재|배상|벌금|부채|적자|하락|급락|파산|부도|횡령|배임|분식|감사의견|상폐|불성실|제소|피소|손실|취약|심각|최고|가장 높|주의|경고|임계|FAIL|CRITICAL|HIGH)$/;
+    /^(위험|리스크|소송|법률|특허|규제|제재|배상|벌금|부채|적자|하락|급락|파산|부도|횡령|배임|분식|감사의견|상폐|불성실|제소|피소|손실|취약|심각|최고|가장 높|주의|경고|임계|CRITICAL|HIGH)$/;
   const parts = text.split(splitPat);
   return parts.map((p, i) => {
     if (!p) return null;

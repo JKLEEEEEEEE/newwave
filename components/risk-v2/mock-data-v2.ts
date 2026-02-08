@@ -639,7 +639,7 @@ export function computeCompanyScores(
   companyId: string,
   categories: RiskCategoryV2[],
   relatedCompanies: CompanyV2[]
-): { directScore: number; propagatedScore: number; totalRiskScore: number; riskLevel: 'PASS' | 'WARNING' | 'FAIL' } {
+): { directScore: number; propagatedScore: number; totalRiskScore: number; riskLevel: 'PASS' | 'WARNING' | 'CRITICAL' } {
   // 직접 점수: 해당 기업 카테고리 가중합
   const companyCats = categories.filter(c => c.companyId === companyId);
   const directScore = Math.round(companyCats.reduce((sum, c) => sum + c.weightedScore, 0));
@@ -650,7 +650,7 @@ export function computeCompanyScores(
   );
 
   const totalRiskScore = directScore + propagatedScore;
-  const riskLevel = totalRiskScore >= 50 ? 'FAIL' : totalRiskScore >= 30 ? 'WARNING' : 'PASS';
+  const riskLevel = totalRiskScore >= 50 ? 'CRITICAL' : totalRiskScore >= 30 ? 'WARNING' : 'PASS';
 
   return { directScore, propagatedScore, totalRiskScore, riskLevel };
 }
@@ -706,7 +706,7 @@ export function buildGraphData(dealId: string): GraphData3D {
     c => c.companyId === mainCompany.id && c.score > 0
   );
   for (const cat of mainCats) {
-    const catLevel = cat.weightedScore >= 15 ? 'FAIL' : cat.weightedScore >= 5 ? 'WARNING' : 'PASS';
+    const catLevel = cat.weightedScore >= 15 ? 'CRITICAL' : cat.weightedScore >= 5 ? 'WARNING' : 'PASS';
     nodes.push({
       id: cat.id,
       name: cat.name,
@@ -732,7 +732,7 @@ export function buildGraphData(dealId: string): GraphData3D {
       e => e.companyId === mainCompany.id && e.categoryCode === cat.code
     );
     for (const ent of catEntities) {
-      const entLevel = ent.riskScore >= 80 ? 'FAIL' : ent.riskScore >= 30 ? 'WARNING' : 'PASS';
+      const entLevel = ent.riskScore >= 80 ? 'CRITICAL' : ent.riskScore >= 30 ? 'WARNING' : 'PASS';
       nodes.push({
         id: ent.id,
         name: ent.name,

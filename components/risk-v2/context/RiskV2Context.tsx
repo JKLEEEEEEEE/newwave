@@ -21,6 +21,7 @@ import type {
   CompanyV2,
   RiskCategoryV2,
   RiskEventV2,
+  TriagedEventV2,
 } from '../types-v2';
 import { riskApiV2 } from '../api-v2';
 
@@ -40,6 +41,7 @@ const initialState: RiskV2State = {
   dealDetail: null,
   dealDetailLoading: false,
   recentEvents: [],
+  criticalAlerts: [],
 };
 
 // ============================================
@@ -144,6 +146,15 @@ function riskV2Reducer(state: RiskV2State, action: RiskV2Action): RiskV2State {
     case 'SET_RECENT_EVENTS':
       return { ...state, recentEvents: action.payload };
 
+    case 'ADD_CRITICAL_ALERTS': {
+      const existingIds = new Set(state.criticalAlerts.map(e => e.id));
+      const newAlerts = action.payload.filter(e => !existingIds.has(e.id));
+      return { ...state, criticalAlerts: [...state.criticalAlerts, ...newAlerts] };
+    }
+
+    case 'DISMISS_CRITICAL_ALERTS':
+      return { ...state, criticalAlerts: [] };
+
     default:
       return state;
   }
@@ -165,6 +176,8 @@ interface RiskV2ContextType {
   toggleCopilot: () => void;
   setCopilotContext: (ctx: CopilotContextData | null) => void;
   navigateBack: (to: 'deals' | 'company' | 'category') => void;
+  addCriticalAlerts: (alerts: TriagedEventV2[]) => void;
+  dismissCriticalAlerts: () => void;
   loadDeals: () => Promise<void>;
   loadDealDetail: (dealId: string) => Promise<void>;
 
@@ -233,6 +246,14 @@ export function RiskV2Provider({
 
   const navigateBack = useCallback((to: 'deals' | 'company' | 'category') => {
     dispatch({ type: 'NAVIGATE_BACK_TO', payload: to });
+  }, []);
+
+  const addCriticalAlerts = useCallback((alerts: TriagedEventV2[]) => {
+    dispatch({ type: 'ADD_CRITICAL_ALERTS', payload: alerts });
+  }, []);
+
+  const dismissCriticalAlerts = useCallback(() => {
+    dispatch({ type: 'DISMISS_CRITICAL_ALERTS' });
   }, []);
 
   /** 딜 목록 로드 */
@@ -332,6 +353,8 @@ export function RiskV2Provider({
     toggleCopilot,
     setCopilotContext,
     navigateBack,
+    addCriticalAlerts,
+    dismissCriticalAlerts,
     loadDeals,
     loadDealDetail,
     currentDeal,

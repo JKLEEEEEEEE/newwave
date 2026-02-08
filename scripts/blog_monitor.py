@@ -62,7 +62,9 @@ class BlogMonitor:
                 RETURN ev.id AS id
             """, {})
             for r in results:
-                self.seen_hashes.add(r["id"])
+                # ev.id = "EVT_BLOG_xxx" → post["id"] = "BLOG_xxx" 형식으로 변환
+                eid = r["id"]
+                self.seen_hashes.add(eid.replace("EVT_", "", 1) if eid.startswith("EVT_") else eid)
             if self.seen_hashes:
                 logger.info(f"기존 블로그 뉴스 {len(self.seen_hashes)}건 로드 (skip 대상)")
         except Exception as e:
@@ -93,7 +95,7 @@ class BlogMonitor:
                     "url": url,
                     "url_hash": url_hash,
                     "id": f"BLOG_{url_hash[:12]}",
-                    "published_at": pub_date.get_text().strip() if pub_date else "",
+                    "published_at": pub_date.get_text().strip() if pub_date else datetime.now().isoformat(),
                     "description": desc.get_text().strip()[:200] if desc else "",
                 })
             return posts
@@ -151,7 +153,7 @@ class BlogMonitor:
                         ev.title = $title, ev.summary = $summary,
                         ev.type = 'NEWS', ev.score = $score, ev.severity = $severity,
                         ev.sourceName = 'BlogMonitor', ev.sourceUrl = $sourceUrl,
-                        ev.publishedAt = $publishedAt, ev.isActive = true,
+                        ev.publishedAt = datetime(), ev.isActive = true,
                         ev.createdAt = datetime()
                     ON MATCH SET
                         ev.title = $title, ev.score = $score, ev.updatedAt = datetime()
@@ -189,22 +191,30 @@ class BlogMonitor:
             logger.warning(f"점수 재계산 실패 ({company_name}): {e}")
 
     def _get_target_companies(self, deal_filter: str | None) -> list[str]:
-        """모니터링 대상 기업 조회"""
+        """모니터링 대상 기업 조회 (메인 + 관련기업 포함)"""
         if deal_filter:
             query = """
                 MATCH (d:Deal)-[:TARGET]->(c:Company)
                 WHERE c.name CONTAINS $filter OR d.id CONTAINS $filter
                 RETURN c.name AS name
+                UNION
+                MATCH (d:Deal)-[:TARGET]->(c:Company)-[:HAS_RELATED]->(rel:Company)
+                WHERE c.name CONTAINS $filter OR d.id CONTAINS $filter
+                RETURN rel.name AS name
             """
             results = self.client.execute_read(query, {"filter": deal_filter})
         else:
             query = """
                 MATCH (d:Deal)-[:TARGET]->(c:Company)
                 RETURN c.name AS name
+                UNION
+                MATCH (d:Deal)-[:TARGET]->(c:Company)-[:HAS_RELATED]->(rel:Company)
+                RETURN rel.name AS name
             """
             results = self.client.execute_read(query, {})
 
-        return [r["name"] for r in results]
+        names = list({r["name"] for r in results})  # 중복 제거
+        return names
 
     def start(self, deal_filter: str | None = None):
         """모니터링 시작"""

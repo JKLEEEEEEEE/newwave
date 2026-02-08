@@ -1,12 +1,12 @@
 /**
- * RiskBadge - PASS / WARNING / FAIL 상태 뱃지
+ * RiskBadge - PASS / WARNING / CRITICAL 상태 뱃지
  * 리스크 레벨에 따라 색상, 아이콘, 라벨 자동 결정
  *
  * Props:
- *   - level: 리스크 레벨 (PASS | WARNING | FAIL)
+ *   - level: 리스크 레벨 (PASS | WARNING | CRITICAL)
  *   - size: 뱃지 크기 (sm | md | lg)
  *   - showLabel: 라벨 텍스트 표시 여부
- *   - animated: FAIL일 때 pulse 애니메이션
+ *   - animated: CRITICAL일 때 pulse 애니메이션
  */
 
 import React from 'react';
@@ -25,7 +25,7 @@ interface RiskBadgeProps {
 const LEVEL_LABELS: Record<RiskLevelV2, string> = {
   PASS: '정상',
   WARNING: '주의',
-  FAIL: '위험',
+  CRITICAL: '위험',
 };
 
 /** 사이즈별 Tailwind 클래스 */
@@ -53,7 +53,7 @@ export default function RiskBadge({
 }: RiskBadgeProps) {
   const colors = RISK_COLORS[level];
   const sizeClasses = SIZE_CLASSES[size];
-  const shouldAnimate = animated && level === 'FAIL';
+  const shouldAnimate = animated && level === 'CRITICAL';
 
   return (
     <span

@@ -19,7 +19,8 @@ class ScoreService:
         """기업 총 리스크 점수 계산"""
         direct_score = self._calculate_direct_score(company_id)
         propagated_score = self._calculate_propagated_score(company_id)
-        total_score = min(100, direct_score + propagated_score)
+        critical_boost = self._calculate_critical_boost(company_id)
+        total_score = min(100, direct_score + propagated_score + critical_boost)
         risk_level = self._determine_status(total_score)
         trend = self._calculate_trend(company_id, total_score)
 
@@ -27,9 +28,13 @@ class ScoreService:
             company_id, direct_score, propagated_score, total_score, risk_level, trend
         )
 
+        if critical_boost > 0:
+            logger.info(f"[{company_id}] CRITICAL 부스트 적용: +{critical_boost}점")
+
         return {
             "direct": direct_score,
             "propagated": propagated_score,
+            "criticalBoost": critical_boost,
             "total": total_score,
             "riskLevel": risk_level,
             "trend": trend,
@@ -45,6 +50,32 @@ class ScoreService:
         if result and result.get("totalWeightedScore"):
             return round(result["totalWeightedScore"])
         return 0
+
+    def _calculate_critical_boost(self, company_id: str) -> int:
+        """CRITICAL 이벤트 부스터 — 부도/회생/파산 등 치명적 이벤트가 있으면 점수 직접 부스트"""
+        query = """
+        MATCH (c:Company {name: $companyId})-[:HAS_CATEGORY]->(rc:RiskCategory)
+              -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
+        WHERE ev.score >= 80
+        RETURN count(ev) AS criticalCount, max(ev.score) AS maxScore
+        """
+        result = self.client.execute_read_single(query, {"companyId": company_id})
+        if not result:
+            return 0
+
+        critical_count = result.get("criticalCount", 0) or 0
+        max_score = result.get("maxScore", 0) or 0
+        boost = 0
+
+        if critical_count >= 3:
+            boost += 30
+        elif critical_count >= 1:
+            boost += 15
+
+        if max_score >= 95:
+            boost += 10
+
+        return boost
 
     def _calculate_propagated_score(self, company_id: str) -> int:
         """전이 리스크 계산 (관련기업 리스크 전이)"""
@@ -62,7 +93,7 @@ class ScoreService:
 
     def _determine_status(self, score: int) -> str:
         if score >= 60:
-            return "FAIL"
+            return "CRITICAL"
         elif score >= 35:
             return "WARNING"
         return "PASS"

@@ -3,7 +3,7 @@
  * 모든 투자 건의 리스크를 한눈에 파악할 수 있는 메인 화면
  *
  * 구성:
- *   1. 상단 요약 카드 (3개: 포트폴리오 수, 평균 리스크, PASS/WARNING/FAIL 분포)
+ *   1. 상단 요약 카드 (3개: 포트폴리오 수, 평균 리스크, PASS/WARNING/CRITICAL 분포)
  *   2. 딜 리스트 (중앙)
  *   3. 선택된 딜 카테고리 히트맵 (하단)
  *   4. 최근 이벤트 피드 (우측)
@@ -136,7 +136,7 @@ const CASE_STATUS_COLORS: Record<string, { color: string; label: string }> = {
 // 메인 컴포넌트
 // ============================================
 export default function CommandCenter() {
-  const { state, selectDeal, selectCategory, setActiveView, currentDeal, currentCompany, currentCategories, loadDeals } = useRiskV2();
+  const { state, selectDeal, selectCategory, setActiveView, currentDeal, currentCompany, currentCategories, loadDeals, addCriticalAlerts } = useRiskV2();
   const { selectedDealId, deals, dealsLoading, dealDetail, dealDetailLoading } = state;
 
   // --- Live Feed 상태 ---
@@ -151,6 +151,9 @@ export default function CommandCenter() {
   const [triageFilter, setTriageFilter] = useState<string>('ALL');
   const [selectedTriageEvent, setSelectedTriageEvent] = useState<TriagedEventV2 | null>(null);
   const [showFullView, setShowFullView] = useState(false);
+
+  // --- CRITICAL 알림: Context dispatch 방식 ---
+  const seenCriticalIdsRef = useRef<Set<string>>(new Set());
 
   // --- Case Management 상태 ---
   const [cases, setCases] = useState<CaseV2[]>([]);
@@ -167,11 +170,11 @@ export default function CommandCenter() {
   }, [deals]);
 
   const levelCounts = useMemo(() => {
-    const counts = { PASS: 0, WARNING: 0, FAIL: 0 };
+    const counts = { PASS: 0, WARNING: 0, CRITICAL: 0 };
     // 모든 딜의 riskLevel 집계 (deals API에서 이미 제공)
     for (const deal of deals) {
       const level = deal.riskLevel ?? getScoreLevel(deal.score ?? 0);
-      if (level === 'FAIL') counts.FAIL++;
+      if (level === 'CRITICAL') counts.CRITICAL++;
       else if (level === 'WARNING') counts.WARNING++;
       else counts.PASS++;
     }
@@ -179,9 +182,9 @@ export default function CommandCenter() {
   }, [deals]);
 
   const donutData = useMemo(() => [
-    { name: 'PASS', value: levelCounts.PASS, color: RISK_COLORS.PASS.primary },
+    { name: 'CRITICAL', value: levelCounts.CRITICAL, color: RISK_COLORS.CRITICAL.primary },
     { name: 'WARNING', value: levelCounts.WARNING, color: RISK_COLORS.WARNING.primary },
-    { name: 'FAIL', value: levelCounts.FAIL, color: RISK_COLORS.FAIL.primary },
+    { name: 'PASS', value: levelCounts.PASS, color: RISK_COLORS.PASS.primary },
   ], [levelCounts]);
 
   // --- 선택된 딜의 메인 기업 카테고리 (Context에서 제공) ---
@@ -224,13 +227,16 @@ export default function CommandCenter() {
     }
   }, [recentEvents]);
 
-  // --- Live Feed: 자동 폴링 ---
+  // --- Live Feed: 자동 폴링 (딜 + triaged events 함께 리페치) ---
   useEffect(() => {
     if (!selectedDealId || !liveActive) return;
-    const timer = setInterval(() => {
+    const timer = setInterval(async () => {
       pollCountRef.current++;
-      // Context의 loadDealDetail을 다시 호출하여 최신 이벤트 가져오기
       loadDeals();
+      try {
+        const res = await riskApiV2.fetchTriagedEvents(selectedDealId);
+        if (res.success) setTriagedEvents(res.data);
+      } catch {}
     }, LIVE_POLL_INTERVAL);
     return () => clearInterval(timer);
   }, [selectedDealId, liveActive, loadDeals]);
@@ -289,6 +295,24 @@ export default function CommandCenter() {
     medium: triagedEvents.filter(e => e.triageLevel === 'MEDIUM').length,
     low: triagedEvents.filter(e => e.triageLevel === 'LOW').length,
   }), [triagedEvents]);
+
+  // --- CRITICAL 이벤트 감지 → Context dispatch ---
+  useEffect(() => {
+    if (triagedEvents.length === 0) return;
+    // 첫 로드 시 모든 기존 이벤트를 seen으로 등록
+    if (seenCriticalIdsRef.current.size === 0) {
+      triagedEvents.forEach(e => seenCriticalIdsRef.current.add(e.id));
+      return;
+    }
+    const newCriticals = triagedEvents.filter(
+      e => (e.triageLevel === 'CRITICAL' || e.score >= 80)
+        && !seenCriticalIdsRef.current.has(e.id)
+    );
+    if (newCriticals.length > 0) {
+      addCriticalAlerts(newCriticals);
+    }
+    triagedEvents.forEach(e => seenCriticalIdsRef.current.add(e.id));
+  }, [triagedEvents, addCriticalAlerts]);
 
   // --- Case 생성 핸들러 ---
   const handleCreateCase = useCallback(async (event: TriagedEventV2) => {
@@ -385,7 +409,7 @@ export default function CommandCenter() {
             </div>
           </GlassCard>
 
-          {/* 1-c. PASS/WARNING/FAIL 도넛 */}
+          {/* 1-c. PASS/WARNING/CRITICAL 도넛 */}
           <GlassCard gradient="danger" className="p-5">
             <p className="text-sm text-slate-400 mb-1">Risk Distribution</p>
             <div className="flex items-center justify-between">
@@ -576,19 +600,19 @@ export default function CommandCenter() {
       {/* ============================================ */}
       <motion.div className="col-span-4" variants={itemVariants}>
         {/* --- 헤더: LIVE 인디케이터 + 케이스 카운터 + View All --- */}
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+        <div className="flex items-center justify-between mb-2 h-8">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2 min-w-0">
             {liveActive && selectedDealId ? (
-              <span className="relative flex h-2.5 w-2.5">
+              <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
               </span>
             ) : (
-              <span className="text-red-400">&#9679;</span>
+              <span className="text-red-400 flex-shrink-0">&#9679;</span>
             )}
-            <span>Live Events{selectedDeal ? ` — ${selectedDeal.targetCompanyName}` : ''}</span>
+            <span className="truncate">Live Events{selectedDeal ? ` — ${selectedDeal.targetCompanyName}` : ''}</span>
             {liveActive && selectedDealId && (
-              <span className="text-[10px] font-mono text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded ml-1">
+              <span className="text-[10px] font-mono text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded flex-shrink-0">
                 LIVE
               </span>
             )}
@@ -596,13 +620,13 @@ export default function CommandCenter() {
               <motion.span
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
-                className="text-[10px] font-bold text-white bg-red-500 rounded-full w-5 h-5 flex items-center justify-center"
+                className="text-[10px] font-bold text-white bg-red-500 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0"
               >
                 {newEventIds.size}
               </motion.span>
             )}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             {/* 활성 케이스 카운터 */}
             {cases.filter(c => c.status === 'OPEN' || c.status === 'IN_PROGRESS').length > 0 && (
               <span className="text-[10px] font-medium text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
@@ -612,36 +636,36 @@ export default function CommandCenter() {
           </div>
         </div>
 
-        {/* --- Triage 필터 탭 (심각도별 필터, 전체는 하단 "전체보기"로) --- */}
-        {triagedEvents.length > 0 && (
-          <div className="flex gap-1 mb-2">
-            {[
-              { key: 'CRITICAL', label: '긴급', count: triageSummary.critical },
-              { key: 'HIGH', label: '높음', count: triageSummary.high },
-              { key: 'MEDIUM', label: '보통', count: triageSummary.medium },
-              { key: 'LOW', label: '낮음', count: triageSummary.low },
-            ].filter(t => t.count > 0).map(tab => {
-              const isActive = triageFilter === tab.key;
-              const tc = TRIAGE_COLORS[tab.key] ?? { color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.15)' };
-              return (
-                <button
-                  key={tab.key}
-                  onClick={() => setTriageFilter(prev => prev === tab.key ? 'ALL' : tab.key)}
-                  className={`text-[10px] font-medium px-2 py-0.5 rounded transition-all ${
-                    isActive ? 'ring-1' : 'opacity-60 hover:opacity-100'
-                  }`}
-                  style={{
-                    color: isActive ? tc.color : '#94a3b8',
-                    backgroundColor: isActive ? tc.bg : 'transparent',
-                    borderColor: tc.color,
-                  }}
-                >
-                  {tab.label} ({tab.count})
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* --- Triage 필터 탭 (항상 4개 표시, 0건은 비활성) --- */}
+        <div className="flex gap-1 mb-2 h-6">
+          {triagedEvents.length > 0 && [
+            { key: 'CRITICAL', label: '긴급', count: triageSummary.critical },
+            { key: 'HIGH', label: '높음', count: triageSummary.high },
+            { key: 'MEDIUM', label: '보통', count: triageSummary.medium },
+            { key: 'LOW', label: '낮음', count: triageSummary.low },
+          ].map(tab => {
+            const isActive = triageFilter === tab.key;
+            const isEmpty = tab.count === 0;
+            const tc = TRIAGE_COLORS[tab.key] ?? { color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.15)' };
+            return (
+              <button
+                key={tab.key}
+                onClick={() => !isEmpty && setTriageFilter(prev => prev === tab.key ? 'ALL' : tab.key)}
+                disabled={isEmpty}
+                className={`text-[10px] font-medium px-2 py-0.5 rounded transition-all ${
+                  isEmpty ? 'opacity-20 cursor-default' : isActive ? 'ring-1' : 'opacity-60 hover:opacity-100'
+                }`}
+                style={{
+                  color: isActive && !isEmpty ? tc.color : '#94a3b8',
+                  backgroundColor: isActive && !isEmpty ? tc.bg : 'transparent',
+                  borderColor: tc.color,
+                }}
+              >
+                {tab.label} ({tab.count})
+              </button>
+            );
+          })}
+        </div>
 
         {/* --- 이벤트 목록 --- */}
         <div className="flex flex-col gap-2 max-h-[520px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(148,163,184,0.2) transparent' }}>
@@ -1094,7 +1118,7 @@ export default function CommandCenter() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-6"
+            className="fixed inset-0 z-50 flex items-start justify-center pt-[5vh] px-6 pb-6"
             onClick={() => setShowFullView(false)}
           >
             {/* 배경 오버레이 */}

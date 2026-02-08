@@ -85,7 +85,7 @@ def get_deals():
             "total": len(deals),
             "pass": sum(1 for d in deals if d["riskLevel"] == "PASS"),
             "warning": sum(1 for d in deals if d["riskLevel"] == "WARNING"),
-            "fail": sum(1 for d in deals if d["riskLevel"] == "FAIL"),
+            "critical": sum(1 for d in deals if d["riskLevel"] == "CRITICAL"),
         }
     }
 
@@ -676,7 +676,7 @@ async def get_deal_graph(deal_id: str):
         cat_id = f"RC_{deal_id}_{cat['code']}"
         cat_score = cat.get("score", 0) or 0
         weighted = cat.get("weightedScore", 0) or 0
-        cat_level = "FAIL" if weighted >= 15 else ("WARNING" if weighted >= 5 else "PASS")
+        cat_level = "CRITICAL" if weighted >= 15 else ("WARNING" if weighted >= 5 else "PASS")
 
         nodes.append({
             "id": cat_id,
@@ -717,7 +717,7 @@ async def get_deal_graph(deal_id: str):
             continue
         entity_ids_seen.add(ent_id)
         ent_score = ent.get("score", 0) or 0
-        ent_level = "FAIL" if ent_score >= 30 else ("WARNING" if ent_score >= 10 else "PASS")
+        ent_level = "CRITICAL" if ent_score >= 30 else ("WARNING" if ent_score >= 10 else "PASS")
 
         nodes.append({
             "id": ent_id,
@@ -819,7 +819,7 @@ async def get_deal_graph(deal_id: str):
             rcat_id = f"RC_{rel_name}_{rcat['code']}"
             rcat_score = rcat.get("score", 0) or 0
             rcat_weighted = rcat.get("weightedScore", 0) or 0
-            rcat_level = "FAIL" if rcat_weighted >= 15 else ("WARNING" if rcat_weighted >= 5 else "PASS")
+            rcat_level = "CRITICAL" if rcat_weighted >= 15 else ("WARNING" if rcat_weighted >= 5 else "PASS")
 
             nodes.append({
                 "id": rcat_id,
@@ -857,7 +857,7 @@ async def get_deal_graph(deal_id: str):
                 continue
             entity_ids_seen.add(rent_id)
             rent_score = rent.get("score", 0) or 0
-            rent_level = "FAIL" if rent_score >= 30 else ("WARNING" if rent_score >= 10 else "PASS")
+            rent_level = "CRITICAL" if rent_score >= 30 else ("WARNING" if rent_score >= 10 else "PASS")
 
             nodes.append({
                 "id": rent_id,
@@ -899,7 +899,7 @@ async def get_deal_graph(deal_id: str):
             continue
         event_ids_seen.add(evt_id)
         evt_score = evt.get("score", 0) or 0
-        evt_level = "FAIL" if evt_score >= 50 else ("WARNING" if evt_score >= 20 else "PASS")
+        evt_level = "CRITICAL" if evt_score >= 50 else ("WARNING" if evt_score >= 20 else "PASS")
 
         nodes.append({
             "id": evt_id,
