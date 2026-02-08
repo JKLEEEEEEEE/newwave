@@ -429,7 +429,10 @@ def build_search_queries_for_company(
     top_n_keywords: int = 10,
 ) -> list[str]:
     """
-    기업 정보를 기반으로 뉴스 검색 쿼리 생성
+    기업 정보를 기반으로 뉴스 검색 쿼리 생성 (카테고리 다양화 전략)
+
+    7개 리스크 카테고리에서 골고루 키워드를 선택하여
+    극단적 키워드 편중을 방지하고 다양한 리스크 신호를 포착.
 
     Args:
         company_name: 기업명
@@ -443,31 +446,41 @@ def build_search_queries_for_company(
     """
     queries: list[str] = []
 
-    # 기본 기업명들
     names = [company_name]
     if aliases:
         names.extend(aliases)
 
-    # 상위 고위험 키워드
-    high_risk = list(get_high_risk_keywords(threshold=40).keys())[:top_n_keywords]
+    # 카테고리별 대표 검색 키워드 (검색 적중률 높은 것 우선)
+    _SEARCH_KEYWORDS_BY_CATEGORY = {
+        "LEGAL":  ["소송", "횡령", "검찰"],
+        "CREDIT": ["부도", "적자전환", "채무불이행"],
+        "GOV":    ["경영권분쟁", "해임", "배임"],
+        "OPS":    ["실적악화", "구조조정", "사업중단"],
+        "AUDIT":  ["감사의견거절", "부적정"],
+        "ESG":    ["환경오염", "안전사고"],
+        "SUPPLY": ["공급차질", "수출규제"],
+    }
 
-    # 1. 기업명 + 리스크 키워드 조합
-    for name in names[:3]:  # 상위 3개 이름만
-        for keyword in high_risk[:5]:  # 상위 5개 키워드만
-            queries.append(f"{name} {keyword}")
+    # 각 카테고리에서 상위 키워드 선택 → 카테고리 다양성 보장
+    diverse_keywords: list[str] = []
+    for cat_keywords in _SEARCH_KEYWORDS_BY_CATEGORY.values():
+        diverse_keywords.extend(cat_keywords[:2])
+
+    # 1. 기업명 + 카테고리 다양화 키워드
+    for name in names[:2]:
+        for kw in diverse_keywords[:top_n_keywords]:
+            queries.append(f"{name} {kw}")
 
     # 2. 제품/서비스 + 결함/리콜 키워드
-    product_keywords = ["결함", "리콜", "불량", "사고"]
     if products:
         for product in products[:3]:
-            for kw in product_keywords:
+            for kw in ["결함", "리콜", "불량", "사고"]:
                 queries.append(f"{product} {kw}")
 
     # 3. 임원/주주 + 법적 키워드
-    person_keywords = ["구속", "횡령", "배임", "기소"]
     if persons:
         for person in persons[:3]:
-            for kw in person_keywords:
+            for kw in ["구속", "횡령", "배임", "기소"]:
                 queries.append(f"{person} {kw}")
 
     return queries

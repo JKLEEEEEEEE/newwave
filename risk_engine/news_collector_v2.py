@@ -58,7 +58,7 @@ NEWS_SOURCES = {
 FILTER_CONFIG = {
     "max_age_days": 30,          # 최대 뉴스 연령
     "min_title_length": 10,       # 최소 제목 길이
-    "min_risk_score": 10,         # 최소 리스크 점수 (저점수 노이즈 차단)
+    "min_risk_score": 8,          # 최소 리스크 점수 (단일 중위험 키워드 통과 기준)
     "require_keyword_match": True,   # 키워드 매칭 필수
 }
 
@@ -438,10 +438,12 @@ class NewsCollectorV2:
             aliases=aliases,
             products=products,
             persons=persons,
-            top_n_keywords=8,
+            top_n_keywords=10,
         )
 
-        # 기업명 단독 쿼리 제거 — 리스크 키워드 조합만 사용
+        # 브로드 리스크 쿼리 (기업명 + 리스크 맥락)
+        queries.insert(0, f"{company_name} 리스크 논란")
+
         # 중복 제거
         return list(dict.fromkeys(queries))
 
