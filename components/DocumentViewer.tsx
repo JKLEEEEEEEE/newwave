@@ -1,5 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
+import ScreeningCriteriaManager from './ScreeningCriteriaManager';
 
 interface Props {
   dealId: string;
@@ -25,7 +26,7 @@ interface Props {
 }
 
 const DocumentViewer: React.FC<Props> = ({ dealId, activePage, onUploadClick, aiSummary, customContent }) => {
-  const [activeTab, setActiveTab] = useState<'pdf' | 'excel'>('pdf');
+  const [activeTab, setActiveTab] = useState<'pdf' | 'criteria'>('pdf');
 
   const content = useMemo(() => {
     if (customContent) return customContent;
@@ -84,8 +85,17 @@ const DocumentViewer: React.FC<Props> = ({ dealId, activePage, onUploadClick, ai
         >
           [IM 보고서: {content.title}]
         </button>
+        <button
+          onClick={() => setActiveTab('criteria')}
+          className={`px-4 py-2 text-xs font-bold rounded-t transition-all ${activeTab === 'criteria' ? 'bg-white text-[#003366] border-b-2 border-[#003366] shadow-sm' : 'text-slate-500 hover:bg-slate-300'}`}
+        >
+          [평가 기준 관리]
+        </button>
       </div>
 
+      {activeTab === 'criteria' ? (
+        <ScreeningCriteriaManager />
+      ) : (
       <div className="flex-1 px-8 pt-8 pb-2 overflow-y-auto overflow-x-visible custom-scrollbar flex flex-col items-center">
         <div className="w-full max-w-[700px] bg-white shadow-xl p-16 relative mb-0 border border-slate-200 rounded-xl">
           <div className="absolute top-8 right-12 text-[9px] text-rose-600 font-bold border border-rose-200 px-2 py-0.5 rounded uppercase">대외주의 - 사외 배포금지</div>
@@ -169,6 +179,7 @@ const DocumentViewer: React.FC<Props> = ({ dealId, activePage, onUploadClick, ai
           </div>
         </div>
       </div>
+      )}
     </div >
   );
 };

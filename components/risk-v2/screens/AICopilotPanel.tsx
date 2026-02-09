@@ -5,7 +5,7 @@
  * 현재 화면 컨텍스트에 맞는 인사이트를 제공하고,
  * Text2Cypher 자연어 질의를 통해 Graph DB를 탐색.
  *
- * GPT-4 AI 활용을 시각적으로 증명하는 핵심 UI 요소.
+ * GPT-5.2 AI 활용을 시각적으로 증명하는 핵심 UI 요소.
  */
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';

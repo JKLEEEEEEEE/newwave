@@ -9,12 +9,38 @@ interface Props {
   onAddClick?: () => void;
 }
 
+/** 한글 통화 문자열 → 억 단위 숫자 변환 (예: '1.2조' → 12000, '4,200억' → 4200) */
+function parseKrwToEok(value: string): number {
+  if (!value) return 0;
+  const cleaned = value.replace(/,/g, '').replace(/\s/g, '');
+  // '조' 포함
+  const joMatch = cleaned.match(/([\d.]+)\s*조/);
+  if (joMatch) return parseFloat(joMatch[1]) * 10000;
+  // '억' 포함
+  const eokMatch = cleaned.match(/([\d.]+)\s*억/);
+  if (eokMatch) return parseFloat(eokMatch[1]);
+  return 0;
+}
+
+/** 억 단위 합산 → 백억 단위 반올림 → 'KRW X.X조' 포맷 */
+function formatAum(totalEok: number): string {
+  // 백억 단위 반올림: 1000억 단위에서 100억 자리 반올림
+  const rounded = Math.round(totalEok / 1000) * 1000;
+  const jo = rounded / 10000;
+  return `KRW ${jo.toFixed(1)}조`;
+}
+
 const GlobalDashboard: React.FC<Props> = ({ deals, onDealClick, onAddClick }) => {
+  const totalAum = React.useMemo(() => {
+    const totalEok = deals.reduce((sum, deal) => sum + parseKrwToEok(deal.mainMetric?.value || ''), 0);
+    return formatAum(totalEok);
+  }, [deals]);
+
   return (
     <div className="p-8 space-y-10 bg-[#f8fafc] min-h-full">
       {/* 1. 상단 요약 스탯 */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard label="총 운용 자산 (AUM)" value="KRW 4.2조" icon="🏦" />
+        <StatCard label="총 운용 자산 (AUM)" value={totalAum} icon="🏦" />
         <StatCard label="현재 검토 중인 딜" value={`${deals.length} 건`} icon="📄" />
         <StatCard
           label="평균 리스크 점수"

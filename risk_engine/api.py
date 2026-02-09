@@ -302,11 +302,18 @@ if V4_AVAILABLE and v4_router:
 
 @app.get("/health")
 async def health_check():
-    """서버 상태 확인"""
+    """서버 상태 확인 (실시간 연결 체크)"""
+    neo4j_ok = False
+    if NEO4J_CLIENT_AVAILABLE and neo4j_client:
+        try:
+            neo4j_client.execute_read("RETURN 1 AS ok", {})
+            neo4j_ok = True
+        except Exception:
+            neo4j_ok = False
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "neo4j": NEO4J_CLIENT_AVAILABLE,
+        "neo4j": neo4j_ok,
         "ai": AI_AVAILABLE,
         "use_mock": USE_MOCK_DATA,
     }

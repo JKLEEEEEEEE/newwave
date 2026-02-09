@@ -53,7 +53,12 @@ def get_client():
 @router.get("/deals")
 def get_deals():
     """딜 목록 조회 (카테고리 요약 포함) - def로 스레드풀 실행"""
-    client = get_client()
+    _empty = {"schemaVersion": "v4", "generatedAt": datetime.now().isoformat(),
+              "deals": [], "summary": {"total": 0, "pass": 0, "warning": 0, "critical": 0}}
+    try:
+        client = get_client()
+    except Exception:
+        return _empty
 
     query = """
     MATCH (d:Deal)-[:TARGET]->(c:Company)
@@ -68,7 +73,11 @@ def get_deals():
            c.totalRiskScore AS score, c.riskLevel AS riskLevel,
            categories, criticalEventCount
     """
-    results = client.execute_read(query, {})
+    try:
+        results = client.execute_read(query, {})
+    except Exception as e:
+        logger.warning(f"Neo4j 딜 조회 실패 (fallback): {e}")
+        return _empty
 
     deals = []
     for r in results:
@@ -1158,7 +1167,11 @@ def get_deal_briefing(deal_id: str):
 @router.get("/alerts/critical")
 def get_critical_alerts(limit: int = 50):
     """전체 딜 대상 CRITICAL 이벤트 조회 (네비게이션 바 알림용)"""
-    client = get_client()
+    _empty = {"schemaVersion": "v4", "generatedAt": datetime.now().isoformat(), "alerts": [], "count": 0}
+    try:
+        client = get_client()
+    except Exception:
+        return _empty
 
     # 모든 딜의 메인기업 + 관련기업에서 고위험 이벤트 조회
     query = """
@@ -1185,7 +1198,11 @@ def get_critical_alerts(limit: int = 50):
     ORDER BY score DESC
     LIMIT $limit
     """
-    events_raw = client.execute_read(query, {"limit": limit}) or []
+    try:
+        events_raw = client.execute_read(query, {"limit": limit}) or []
+    except Exception as e:
+        logger.warning(f"Neo4j CRITICAL 알림 조회 실패 (fallback): {e}")
+        return _empty
 
     # 트리아지 점수 계산 + CRITICAL 필터
     alerts = []
@@ -1207,8 +1224,8 @@ def get_critical_alerts(limit: int = 50):
         triage_score = round(severity_score * 0.4 + urgency * 0.3 + confidence * 0.3, 1)
         triage_level = _calc_triage_level(triage_score)
 
-        # CRITICAL 레벨이거나 원점수 80 이상만
-        if triage_level != "CRITICAL" and (e.get("score", 0) or 0) < 80:
+        # CRITICAL 조건: triage CRITICAL이거나, severity가 CRITICAL/HIGH이거나, 원점수 70 이상
+        if triage_level != "CRITICAL" and severity_str not in ("CRITICAL", "HIGH") and (e.get("score", 0) or 0) < 70:
             continue
 
         alerts.append({
@@ -1350,7 +1367,12 @@ def _calc_triage_level(score: float) -> str:
 @router.get("/deals/{deal_id}/events/triaged")
 def get_triaged_events(deal_id: str, limit: int = 30):
     """Smart Triage 이벤트 목록 (3축 점수: Severity + Urgency + Confidence) - def로 스레드풀 실행"""
-    client = get_client()
+    _empty = {"schemaVersion": "v4", "generatedAt": datetime.now().isoformat(),
+              "events": [], "summary": {"total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}}
+    try:
+        client = get_client()
+    except Exception:
+        return _empty
 
     # 메인기업 + 관련기업 이벤트 모두 가져오기
     events_query = """
@@ -1375,7 +1397,11 @@ def get_triaged_events(deal_id: str, limit: int = 30):
     ORDER BY score DESC
     LIMIT $limit
     """
-    events_raw = client.execute_read(events_query, {"dealId": deal_id, "limit": limit}) or []
+    try:
+        events_raw = client.execute_read(events_query, {"dealId": deal_id, "limit": limit}) or []
+    except Exception as e:
+        logger.warning(f"Neo4j 트리아지 이벤트 조회 실패 (fallback): {e}")
+        return _empty
 
     # 트리아지 점수 계산
     triaged = []

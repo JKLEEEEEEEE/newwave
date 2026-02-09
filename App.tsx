@@ -4,8 +4,8 @@ import Header from './components/Header';
 import DocumentViewer from './components/DocumentViewer';
 import AnalysisPanel from './components/AnalysisPanel';
 import GlobalDashboard from './components/GlobalDashboard';
-import Timeline from './components/Timeline';
-import ApiStatusBar from './components/ApiStatusBar';
+// import Timeline from './components/Timeline';
+// import ApiStatusBar from './components/ApiStatusBar';
 import RiskShell from './components/risk-v2/layout/RiskShell';
 import PDFUploadModal from './components/PDFUploadModal';
 import { HurdleStatus, VerificationData, DealSummary, ScoringModule, APIScoringResult } from './types';
@@ -367,7 +367,7 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-slate-50 font-['Pretendard']">
       <Header onViewChange={(v) => setViewMode(v)} currentView={viewMode} />
-      <ApiStatusBar />
+      {/* <ApiStatusBar /> */}
 
       <div className="flex-1 overflow-hidden relative flex flex-col">
         {viewMode === 'analysis' && (
@@ -415,7 +415,7 @@ const App: React.FC = () => {
         )}
       </div>
 
-      {viewMode === 'analysis' && <Timeline events={analysisData.timeline} />}
+      {/* {viewMode === 'analysis' && <Timeline events={analysisData.timeline} />} */}
 
       <PDFUploadModal
         isOpen={isUploadModalOpen}

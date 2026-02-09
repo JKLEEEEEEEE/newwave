@@ -286,7 +286,7 @@ function CompanyDetailLevel({
         <div>
           <h2 className="text-2xl font-bold text-white">{company.name}</h2>
           <p className="text-slate-400 mt-1">
-            {company.sector} | {company.market} | {company.ticker}
+            {[company.sector, company.market, company.ticker].filter(Boolean).join(' | ')}
           </p>
           <div className="mt-2">
             <RiskBadge level={company.riskLevel} size="lg" animated />
@@ -425,7 +425,7 @@ function CompanyDetailLevel({
                     <div>
                       <h4 className="text-white font-medium">{rel.name}</h4>
                       <p className="text-slate-500 text-sm mt-1">
-                        {relation} | {tierLabel} | {rel.sector}
+                        {[relation, tierLabel, rel.sector].filter(Boolean).join(' | ')}
                       </p>
                     </div>
                     <div className="text-right">

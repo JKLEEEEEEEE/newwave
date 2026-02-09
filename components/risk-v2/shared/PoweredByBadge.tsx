@@ -1,6 +1,6 @@
 /**
  * PoweredByBadge - 기술 스택 뱃지
- * "Neo4j Powered" / "GPT-4 Powered" / "Both" 표시
+ * "Neo4j Powered" / "GPT-5.2 Powered" / "Both" 표시
  *
  * Props:
  *   - type: 뱃지 타입 ('neo4j' | 'gpt4' | 'both')
@@ -23,7 +23,7 @@ const BADGE_CONFIG = {
     color: '#00f2fe',
   },
   gpt4: {
-    label: 'GPT-4 Powered',
+    label: 'GPT-5.2 Powered',
     icon: '\u2728',  // 반짝
     gradient: GRADIENTS.purple,
     color: '#a855f7',

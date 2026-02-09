@@ -995,6 +995,82 @@ async function checkApiHealthV2(): Promise<boolean> {
   }
 }
 
+/** 개별 API 상태 상세 체크 (hover 팝업용) */
+export interface ApiServiceStatus {
+  name: string;
+  url: string;
+  status: 'ok' | 'fail' | 'checking';
+  latency?: number; // ms
+}
+
+async function checkDetailedHealthV2(): Promise<ApiServiceStatus[]> {
+  const services: ApiServiceStatus[] = [];
+
+  // 1. FastAPI Server (Risk Engine)
+  const fastApiCheck = async (): Promise<ApiServiceStatus> => {
+    const start = Date.now();
+    try {
+      const res = await fetch(`${BASE_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(5000) });
+      const data = await res.json();
+      return { name: 'Risk Engine (FastAPI)', url: `${BASE_URL}/health`, status: res.ok ? 'ok' : 'fail', latency: Date.now() - start };
+    } catch {
+      return { name: 'Risk Engine (FastAPI)', url: `${BASE_URL}/health`, status: 'fail', latency: Date.now() - start };
+    }
+  };
+
+  // 2. Neo4j (via /health response)
+  const neo4jCheck = async (): Promise<ApiServiceStatus> => {
+    const start = Date.now();
+    try {
+      const res = await fetch(`${BASE_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(5000) });
+      const data = await res.json();
+      return { name: 'Neo4j (Graph DB)', url: 'neo4j+ssc://378d289b.databases.neo4j.io', status: data.neo4j ? 'ok' : 'fail', latency: Date.now() - start };
+    } catch {
+      return { name: 'Neo4j (Graph DB)', url: 'neo4j+ssc://...', status: 'fail', latency: Date.now() - start };
+    }
+  };
+
+  // 3. Express Server (IM Analysis)
+  const expressCheck = async (): Promise<ApiServiceStatus> => {
+    const start = Date.now();
+    try {
+      const res = await fetch('http://localhost:3001/api/screening-criteria', { method: 'GET', signal: AbortSignal.timeout(5000) });
+      return { name: 'IM Server (Express)', url: 'http://localhost:3001', status: res.ok ? 'ok' : 'fail', latency: Date.now() - start };
+    } catch {
+      return { name: 'IM Server (Express)', url: 'http://localhost:3001', status: 'fail', latency: Date.now() - start };
+    }
+  };
+
+  // 4. Deals API
+  const dealsCheck = async (): Promise<ApiServiceStatus> => {
+    const start = Date.now();
+    try {
+      const res = await fetch(`${BASE_URL}/api/v4/deals`, { method: 'GET', signal: AbortSignal.timeout(5000) });
+      return { name: 'Deals API', url: `${BASE_URL}/api/v4/deals`, status: res.ok ? 'ok' : 'fail', latency: Date.now() - start };
+    } catch {
+      return { name: 'Deals API', url: `${BASE_URL}/api/v4/deals`, status: 'fail', latency: Date.now() - start };
+    }
+  };
+
+  // 5. AI 분석 (OpenAI GPT-5.2)
+  const aiCheck = async (): Promise<ApiServiceStatus> => {
+    const start = Date.now();
+    try {
+      const res = await fetch(`${BASE_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(5000) });
+      const data = await res.json();
+      return { name: 'AI Engine', url: 'OpenAI GPT-5.2', status: data.ai ? 'ok' : 'fail', latency: Date.now() - start };
+    } catch {
+      return { name: 'AI Engine', url: 'OpenAI GPT-5.2', status: 'fail', latency: Date.now() - start };
+    }
+  };
+
+  const results = await Promise.all([
+    fastApiCheck(), neo4jCheck(), expressCheck(), dealsCheck(), aiCheck()
+  ]);
+
+  return results;
+}
+
 // ============================================
 // 기사 원문 프록시
 // ============================================
@@ -1047,6 +1123,7 @@ export const riskApiV2 = {
   fetchArticleContent: fetchArticleContentV2,
   // 유틸
   checkApiHealth: checkApiHealthV2,
+  checkDetailedHealth: checkDetailedHealthV2,
   // 상태
   get isMockMode() { return false; },
 } as const;

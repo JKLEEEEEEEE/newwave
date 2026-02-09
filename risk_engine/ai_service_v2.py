@@ -40,7 +40,7 @@ class AIServiceV2:
 
     def __init__(self):
         self._client = None
-        self.model = os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview")
+        self.model = os.getenv("OPENAI_MODEL", "gpt-5.2")
         self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", 2000))
         self.temperature = float(os.getenv("OPENAI_TEMPERATURE", 0.7))
 

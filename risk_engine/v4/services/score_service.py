@@ -62,7 +62,7 @@ class ScoreService:
         query = """
         MATCH (c:Company {name: $companyId})-[:HAS_CATEGORY]->(rc:RiskCategory)
               -[:HAS_ENTITY]->(re:RiskEntity)-[:HAS_EVENT]->(ev:RiskEvent)
-        WHERE ev.score >= 80
+        WHERE ev.score >= 80 OR ev.severity = 'CRITICAL'
         RETURN count(ev) AS criticalCount, max(ev.score) AS maxScore
         """
         result = self.client.execute_read_single(query, {"companyId": company_id})

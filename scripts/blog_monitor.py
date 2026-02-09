@@ -35,11 +35,12 @@ from risk_engine.neo4j_client import Neo4jClient
 from risk_engine.news_collector_v2 import NewsData, NewsCollectorV2
 from risk_engine.keywords import match_keywords
 from risk_engine.score_engine import calculate_final_score
+from risk_engine.alert_sender import get_alert_manager, AlertChannel, AlertPriority
 
 logger = logging.getLogger(__name__)
 
 BLOG_RSS_URL = "https://rss.blog.naver.com/cmylose0102.xml"
-DEFAULT_INTERVAL = 30  # 초
+DEFAULT_INTERVAL = 5  # 초
 
 
 class BlogMonitor:
@@ -105,26 +106,43 @@ class BlogMonitor:
             return []
 
     def _analyze_and_save(self, post: dict, target_companies: list[str]) -> bool:
-        """블로그 글 분석 → Neo4j 저장"""
+        """블로그 글 분석 → Neo4j 저장
+
+        엄격한 AND 조건 필터:
+        (기사 제목 OR 내용에 회사명 포함) AND (리스크 키워드 매칭)
+        두 조건 모두 충족해야만 저장.
+        """
         title = post["title"]
         desc = post.get("description", "")
         text = f"{title} {desc}"
 
-        # 키워드 매칭 (제목 + 설명)
+        # [조건 1] 기업명 관련성 필터 먼저 체크
+        # 제목 OR 본문에 기업명(풀네임 또는 첫 단어)이 포함된 기업만 대상
+        relevant_companies = [
+            c for c in target_companies
+            if c in title or c in desc or c.split()[0] in title or c.split()[0] in desc
+        ]
+        if not relevant_companies:
+            logger.info(f"  [SKIP] 관련 기업 없음: {title[:40]}")
+            return False
+
+        # [조건 2] 리스크 키워드 매칭 (제목 + 설명)
         match_result = match_keywords(text, source="NEWS")
 
         if match_result.keyword_count == 0:
             logger.info(f"  [SKIP] 키워드 없음: {title[:40]}")
             return False
 
-        # 점수 계산
+        # AND 조건 충족 — 점수 계산
         score_result = calculate_final_score(match_result, datetime.now(), source="NEWS")
 
         keywords_str = ", ".join(f"{kw.keyword}({kw.score})" for kw in match_result.matched_keywords[:5])
+        companies_str = ", ".join(relevant_companies[:3])
         logger.info(
             f"  [RISK] {title[:40]}... "
             f"→ score={score_result.final_score:.1f} "
-            f"keywords=[{keywords_str}]"
+            f"keywords=[{keywords_str}] "
+            f"companies=[{companies_str}]"
         )
 
         # 매칭되는 기업에 저장
@@ -132,11 +150,15 @@ class BlogMonitor:
             match_result.primary_category, "OTHER"
         ) if match_result.primary_category else "OTHER"
 
+        # 심각도 판정은 raw_score 기준 (decay 적용 전 키워드 원점수)
+        # 파산(60), 횡령(50), 배임(50) 등 고위험 키워드가 있으면 HIGH/CRITICAL
+        raw = match_result.raw_score
+        severity = "CRITICAL" if raw >= 60 else "HIGH" if raw >= 40 else "MEDIUM" if raw >= 20 else "LOW"
+
         saved = 0
-        for company_name in target_companies:
+        for company_name in relevant_companies:
             try:
                 score = score_result.final_score
-                severity = "HIGH" if score >= 60 else "MEDIUM" if score >= 30 else "LOW"
 
                 self.client.execute_write("""
                     MATCH (c:Company {name: $companyId})-[:HAS_CATEGORY]->(rc:RiskCategory {code: $catCode})
@@ -151,12 +173,12 @@ class BlogMonitor:
                     MERGE (ev:RiskEvent {id: $eventId})
                     ON CREATE SET
                         ev.title = $title, ev.summary = $summary,
-                        ev.type = 'NEWS', ev.score = $score, ev.severity = $severity,
+                        ev.type = 'NEWS', ev.score = $rawScore, ev.severity = $severity,
                         ev.sourceName = 'BlogMonitor', ev.sourceUrl = $sourceUrl,
                         ev.publishedAt = datetime(), ev.isActive = true,
                         ev.createdAt = datetime()
                     ON MATCH SET
-                        ev.title = $title, ev.score = $score, ev.updatedAt = datetime()
+                        ev.title = $title, ev.score = $rawScore, ev.updatedAt = datetime()
                     MERGE (re)-[:HAS_EVENT]->(ev)
                 """, {
                     "companyId": company_name,
@@ -166,7 +188,7 @@ class BlogMonitor:
                     "eventId": f"EVT_{post['id']}",
                     "title": title,
                     "summary": title,
-                    "score": score,
+                    "rawScore": raw,
                     "severity": severity,
                     "sourceUrl": post["url"],
                     "publishedAt": post.get("published_at", ""),
@@ -177,10 +199,51 @@ class BlogMonitor:
 
         if saved > 0:
             # 점수 재계산
-            for company_name in target_companies:
+            for company_name in relevant_companies:
                 self._recalc_score(company_name)
 
+            # CRITICAL/HIGH 이벤트 감지 시 Telegram 알림 발송
+            if severity in ("CRITICAL", "HIGH"):
+                self._send_telegram_alert(title, raw, severity, relevant_companies, match_result)
+
         return saved > 0
+
+    def _send_telegram_alert(self, title, raw_score, severity, companies, match_result):
+        """CRITICAL/HIGH 이벤트 감지 시 Telegram 발송"""
+        import asyncio
+
+        try:
+            manager = get_alert_manager()
+            keywords = [kw.keyword for kw in match_result.matched_keywords[:5]]
+            company_names = ", ".join(companies[:3])
+            keywords_str = ", ".join(keywords)
+
+            async def _send():
+                return await manager.process_signal(
+                    company_id=companies[0] if companies else "unknown",
+                    company_name=company_names,
+                    score=int(raw_score),
+                    status="FAIL" if severity == "CRITICAL" else "WARNING",
+                    source="BlogMonitor",
+                    title=f"[{severity}] {company_names} 리스크 감지",
+                    message=(
+                        f"담당자님께 긴급 안내드립니다.\n\n"
+                        f"대상 기업: {company_names}\n"
+                        f"감지 내용: {title}\n"
+                        f"위험 키워드: {keywords_str}\n"
+                        f"위험 점수: {int(raw_score)} | 심각도: {severity}\n\n"
+                        f"즉시 확인 및 대응 부탁드립니다."
+                    ),
+                    keywords=keywords,
+                )
+
+            results = asyncio.run(_send())
+            for r in results:
+                if r.channel == AlertChannel.TELEGRAM:
+                    send_status = "성공" if r.success else f"실패({r.error})"
+                    logger.info(f"  [TELEGRAM] {send_status}")
+        except Exception as e:
+            logger.warning(f"  [TELEGRAM] 발송 오류: {e}")
 
     def _recalc_score(self, company_name: str):
         """기업 점수 재계산"""

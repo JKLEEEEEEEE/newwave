@@ -34,6 +34,7 @@ class AlertChannel(str, Enum):
     SLACK = "slack"
     WEBHOOK = "webhook"
     CONSOLE = "console"
+    TELEGRAM = "telegram"
 
 
 class AlertPriority(str, Enum):
@@ -341,6 +342,98 @@ class EmailAlertSender(AlertSenderBase):
         )
 
 
+class TelegramAlertSender(AlertSenderBase):
+    """Telegram Bot API 알림 발송기"""
+
+    API_URL = "https://api.telegram.org/bot{token}/sendMessage"
+
+    def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
+        self.bot_token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
+        self.chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID")
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.bot_token and self.chat_id)
+
+    async def send(self, alert: Alert) -> AlertResult:
+        if not self.is_configured:
+            return AlertResult(
+                alert_id=alert.id,
+                channel=AlertChannel.TELEGRAM,
+                success=False,
+                sent_at=datetime.now(),
+                error="Telegram bot_token or chat_id not configured"
+            )
+
+        priority_emoji = {
+            AlertPriority.LOW: "\U0001f535",      # blue
+            AlertPriority.MEDIUM: "\U0001f7e1",   # yellow
+            AlertPriority.HIGH: "\U0001f7e0",     # orange
+            AlertPriority.CRITICAL: "\U0001f534",  # red
+        }
+
+        emoji = priority_emoji.get(alert.priority, "\u26aa")
+        keywords_text = ", ".join(alert.keywords) if alert.keywords else "N/A"
+
+        text = (
+            f"{emoji} <b>[{alert.priority.value.upper()}] {alert.title}</b>\n\n"
+            f"\U0001f3e2 <b>기업:</b> {alert.company_name}\n"
+            f"\U0001f4ca <b>점수:</b> {alert.score} | <b>Status:</b> {alert.status}\n"
+            f"\U0001f4f0 <b>소스:</b> {alert.source}\n"
+            f"\U0001f50d <b>키워드:</b> {keywords_text}\n\n"
+            f"{alert.message}"
+        )
+
+        # chat_id: @username 형식이면 그대로, 숫자이면 그대로
+        chat_id = self.chat_id
+        if not chat_id.startswith("@") and not chat_id.lstrip("-").isdigit():
+            chat_id = f"@{chat_id}"
+
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+
+        try:
+            url = self.API_URL.format(token=self.bot_token)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    body = await response.json()
+                    if response.status == 200 and body.get("ok"):
+                        logger.info(f"Telegram 발송 성공: {alert.title[:30]}")
+                        return AlertResult(
+                            alert_id=alert.id,
+                            channel=AlertChannel.TELEGRAM,
+                            success=True,
+                            sent_at=datetime.now()
+                        )
+                    else:
+                        error_msg = body.get("description", f"HTTP {response.status}")
+                        logger.warning(f"Telegram 발송 실패: {error_msg}")
+                        return AlertResult(
+                            alert_id=alert.id,
+                            channel=AlertChannel.TELEGRAM,
+                            success=False,
+                            sent_at=datetime.now(),
+                            error=error_msg
+                        )
+
+        except Exception as e:
+            return AlertResult(
+                alert_id=alert.id,
+                channel=AlertChannel.TELEGRAM,
+                success=False,
+                sent_at=datetime.now(),
+                error=str(e)
+            )
+
+
 class AlertManager:
     """
     알림 관리자
@@ -355,10 +448,10 @@ class AlertManager:
         AlertRule(
             id="rule_critical",
             name="Critical Alert",
-            min_score=75,
+            min_score=50,
             status_filter=["FAIL"],
             priority=AlertPriority.CRITICAL,
-            channels=[AlertChannel.SLACK, AlertChannel.CONSOLE]
+            channels=[AlertChannel.SLACK, AlertChannel.TELEGRAM, AlertChannel.CONSOLE]
         ),
         AlertRule(
             id="rule_warning",
@@ -383,7 +476,8 @@ class AlertManager:
             AlertChannel.CONSOLE: ConsoleAlertSender(),
             AlertChannel.SLACK: SlackAlertSender(),
             AlertChannel.WEBHOOK: WebhookAlertSender(),
-            AlertChannel.EMAIL: EmailAlertSender()
+            AlertChannel.EMAIL: EmailAlertSender(),
+            AlertChannel.TELEGRAM: TelegramAlertSender(),
         }
         self.rules: List[AlertRule] = self.DEFAULT_RULES.copy()
         self.alert_history: List[Alert] = []

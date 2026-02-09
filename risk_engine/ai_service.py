@@ -22,7 +22,7 @@ except ImportError:
 
 
 # 모델 설정 (테스트용: gpt-4.1-mini)
-MODEL = "gpt-4.1-mini"
+MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")
 
 
 def generate_action_guide_ai(signal_type: str, company: str, news_content: str = "") -> Dict:

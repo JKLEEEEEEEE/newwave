@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { riskApiV2 } from './risk-v2/api-v2';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { riskApiV2, type ApiServiceStatus } from './risk-v2/api-v2';
 
 type ApiStatus = 'checking' | 'connected' | 'disconnected';
 
@@ -18,6 +18,11 @@ const API_STATUS_CONFIG: Record<ApiStatus, { color: string; shadow: string; labe
 
 const Header: React.FC<Props> = ({ onViewChange, currentView }) => {
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking');
+  const [showDetail, setShowDetail] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [serviceStatuses, setServiceStatuses] = useState<ApiServiceStatus[]>([]);
+  const hoverRef = useRef<HTMLDivElement>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkHealth = useCallback(async () => {
     try {
@@ -34,6 +39,24 @@ const Header: React.FC<Props> = ({ onViewChange, currentView }) => {
     return () => clearInterval(interval);
   }, [checkHealth]);
 
+  const handleMouseEnter = useCallback(async () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    setShowDetail(true);
+    setDetailLoading(true);
+    try {
+      const statuses = await riskApiV2.checkDetailedHealth();
+      setServiceStatuses(statuses);
+    } catch {
+      setServiceStatuses([]);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    hoverTimerRef.current = setTimeout(() => setShowDetail(false), 200);
+  }, []);
+
   const statusCfg = API_STATUS_CONFIG[apiStatus];
 
   return (
@@ -49,16 +72,55 @@ const Header: React.FC<Props> = ({ onViewChange, currentView }) => {
 
         <div className="h-8 w-px bg-white/10 mx-2"></div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 relative" ref={hoverRef}>
           <span className="text-[10px] font-bold text-blue-200/60 uppercase tracking-widest">API 상태:</span>
           <button
             onClick={checkHealth}
-            title="클릭하여 연결 상태 재확인"
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
             className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-md border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
           >
              <div className={`w-1.5 h-1.5 rounded-full ${statusCfg.color} ${statusCfg.shadow} ${statusCfg.pulse ? 'animate-pulse' : ''}`}></div>
              <span className="text-[10px] font-bold text-slate-100 uppercase">{statusCfg.label}</span>
           </button>
+
+          {/* API 상세 상태 팝업 */}
+          {showDetail && (
+            <div
+              className="absolute top-full left-0 mt-2 w-[340px] bg-[#0a1628] border border-white/15 rounded-lg shadow-2xl z-[100] p-3"
+              onMouseEnter={() => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); }}
+              onMouseLeave={handleMouseLeave}
+            >
+              <div className="text-[10px] font-bold text-blue-200/80 uppercase tracking-widest mb-2 pb-1.5 border-b border-white/10">
+                API 연결 상태 상세
+              </div>
+              {detailLoading ? (
+                <div className="text-[11px] text-slate-400 py-3 text-center animate-pulse">상태 확인 중...</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {serviceStatuses.map((svc, i) => (
+                    <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-white/5">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${svc.status === 'ok' ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.5)]' : 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.5)]'}`}></div>
+                        <span className="text-[11px] font-bold text-white">{svc.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {svc.latency !== undefined && (
+                          <span className="text-[9px] text-slate-500">{svc.latency}ms</span>
+                        )}
+                        <span className={`text-[10px] font-bold ${svc.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {svc.status === 'ok' ? 'OK' : 'FAIL'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-2 pt-1.5 border-t border-white/10 text-[9px] text-slate-500 text-center">
+                마우스를 올리면 실시간 상태를 확인합니다
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -303,6 +303,15 @@ class NewsCollectorV2:
         if source_types is None:
             source_types = list(NEWS_SOURCES.keys())
 
+        # 기업명 관련성 체크용 이름 목록 구축
+        company_names = [company_name]
+        # 첫 단어도 추가 (예: "잡코리아 인터내셔널" → "잡코리아")
+        first_word = company_name.split()[0] if company_name else ""
+        if first_word and first_word != company_name:
+            company_names.append(first_word)
+        if aliases:
+            company_names.extend(aliases)
+
         all_news: list[NewsData] = []
 
         # 각 쿼리 & 소스 조합으로 수집
@@ -331,6 +340,13 @@ class NewsCollectorV2:
                 # 검증
                 validation = self.validator.validate(news.to_dict(), "News")
                 if validation.is_valid:
+                    # 기업명 관련성 필터 (엄격 AND 조건)
+                    # 조건: (기사 제목에 회사명 포함) AND (리스크 키워드 매칭)
+                    if not self._check_company_relevance(news.title, company_names):
+                        logger.debug(f"[SKIP] 기업명 미포함: {news.title[:50]}")
+                        result.total_analyzed += 1
+                        continue
+
                     # 필터 적용
                     if self._apply_filters(news):
                         result.news_list.append(news)
@@ -347,6 +363,27 @@ class NewsCollectorV2:
         result.completed_at = datetime.now()
         logger.info(f"뉴스 수집 완료: {company_name} - {result.total_valid}/{result.total_fetched} 건")
         return result
+
+    @staticmethod
+    def _check_company_relevance(title: str, company_names: list[str]) -> bool:
+        """
+        기사 제목에 대상 기업명이 포함되어 있는지 확인
+
+        AND 조건 필터: (기사 제목 OR 내용에 회사명 포함) AND (리스크 키워드)
+        리스크 키워드는 이미 analyze_news에서 체크되므로,
+        여기서는 기업명 포함 여부만 확인.
+
+        Args:
+            title: 기사 제목
+            company_names: 기업명 + 별칭 목록
+
+        Returns:
+            기업명이 제목에 포함되어 있으면 True
+        """
+        for name in company_names:
+            if name and name in title:
+                return True
+        return False
 
     def _fetch_from_source(
         self,

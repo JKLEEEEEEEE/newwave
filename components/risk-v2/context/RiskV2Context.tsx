@@ -148,13 +148,15 @@ function riskV2Reducer(state: RiskV2State, action: RiskV2Action): RiskV2State {
       return { ...state, recentEvents: action.payload };
 
     case 'SET_CRITICAL_ALERTS': {
-      // 새 이벤트가 추가되면 acknowledged 리셋
-      const prevIds = new Set(state.criticalAlerts.map(e => e.id));
-      const hasNew = action.payload.some(e => !prevIds.has(e.id));
+      // localStorage에서 확인 완료된 ID 목록 가져오기
+      let ackedIds: string[] = [];
+      try { ackedIds = JSON.parse(localStorage.getItem('criticalAckedIds') || '[]'); } catch {}
+      const ackedSet = new Set(ackedIds);
+      const hasNew = action.payload.some((e: { id: string }) => !ackedSet.has(e.id));
       return {
         ...state,
         criticalAlerts: action.payload,
-        criticalAcknowledged: hasNew ? false : state.criticalAcknowledged,
+        criticalAcknowledged: hasNew ? false : action.payload.length > 0,
       };
     }
 
@@ -254,8 +256,11 @@ export function RiskV2Provider({
   }, []);
 
   const acknowledgeCriticalAlerts = useCallback(() => {
+    // 현재 CRITICAL alert ID들을 localStorage에 저장
+    const ids = state.criticalAlerts.map(e => e.id);
+    try { localStorage.setItem('criticalAckedIds', JSON.stringify(ids)); } catch {}
     dispatch({ type: 'ACKNOWLEDGE_CRITICAL_ALERTS' });
-  }, []);
+  }, [state.criticalAlerts]);
 
   /** 딜 목록 로드 */
   const loadDeals = useCallback(async () => {

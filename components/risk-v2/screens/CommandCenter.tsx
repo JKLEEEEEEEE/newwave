@@ -106,7 +106,7 @@ function getScoreDelta(data: number[]): number {
 // ============================================
 // Live Feed 상수
 // ============================================
-const LIVE_POLL_INTERVAL = 30_000; // 30초 폴링
+const LIVE_POLL_INTERVAL = 10_000; // 10초 폴링
 
 // ============================================
 // Triage 색상/레이블 상수
@@ -155,6 +155,9 @@ export default function CommandCenter() {
   // --- Case Management 상태 ---
   const [cases, setCases] = useState<CaseV2[]>([]);
   const [creatingCase, setCreatingCase] = useState<string | null>(null);
+
+  // --- CRITICAL 레드 경보 플래시 ---
+  const [criticalFlash, setCriticalFlash] = useState(false);
 
   // --- 요약 데이터 계산 ---
   const summary = useMemo(() => {
@@ -224,19 +227,27 @@ export default function CommandCenter() {
     }
   }, [recentEvents]);
 
-  // --- Live Feed: 자동 폴링 (딜 + triaged events 함께 리페치) ---
+  // --- Live Feed: 딜 목록 자동 폴링 (항상 동작 — 점수/분포 실시간 갱신) ---
+  useEffect(() => {
+    if (!liveActive) return;
+    const timer = setInterval(() => {
+      pollCountRef.current++;
+      loadDeals();
+    }, LIVE_POLL_INTERVAL);
+    return () => clearInterval(timer);
+  }, [liveActive, loadDeals]);
+
+  // --- Live Feed: triaged events 폴링 (딜 선택 시에만) ---
   useEffect(() => {
     if (!selectedDealId || !liveActive) return;
     const timer = setInterval(async () => {
-      pollCountRef.current++;
-      loadDeals();
       try {
         const res = await riskApiV2.fetchTriagedEvents(selectedDealId);
         if (res.success) setTriagedEvents(res.data);
       } catch {}
     }, LIVE_POLL_INTERVAL);
     return () => clearInterval(timer);
-  }, [selectedDealId, liveActive, loadDeals]);
+  }, [selectedDealId, liveActive]);
 
   // --- Sparkline 데이터 캐시 ---
   const sparklineCache = useMemo(() => {
@@ -277,6 +288,18 @@ export default function CommandCenter() {
     })();
     return () => { cancelled = true; };
   }, [selectedDealId]);
+
+  // --- CRITICAL 이벤트 감지 → 레드 경보 플래시 ---
+  // 전역 criticalAlerts가 있고 미확인 상태면 5초간 플래시
+  useEffect(() => {
+    if (state.criticalAlerts.length > 0 && !state.criticalAcknowledged) {
+      setCriticalFlash(true);
+      const timer = setTimeout(() => setCriticalFlash(false), 5000);
+      return () => clearTimeout(timer);
+    } else {
+      setCriticalFlash(false);
+    }
+  }, [state.criticalAlerts, state.criticalAcknowledged]);
 
   // --- Triage 필터링 ---
   const filteredTriaged = useMemo(() => {
@@ -474,97 +497,56 @@ export default function CommandCenter() {
                   className={`p-4 ${isSelected ? 'ring-2 ring-purple-500' : ''}`}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      {/* 딜 점수 게이지 — 선택 + 로딩 중이면 스켈레톤 */}
-                      {isSelected && dealDetailLoading ? (
-                        <div className="w-[60px] h-[60px] rounded-full bg-slate-700/30 animate-pulse flex-shrink-0" />
-                      ) : (
-                        <ScoreGauge
-                          score={company ? company.totalRiskScore : (deal.score ?? 0)}
-                          size={isSelected ? 60 : 48}
-                          directScore={company?.directScore}
-                          propagatedScore={company?.propagatedScore}
-                          riskLevel={company?.riskLevel ?? deal.riskLevel}
-                        />
-                      )}
-                      <div>
-                        <h3 className="text-white font-medium text-base">{deal.name}</h3>
-                        {isSelected && dealDetailLoading ? (
-                          <div className="mt-1 space-y-1.5">
-                            <div className="h-3 w-32 bg-slate-700/30 rounded animate-pulse" />
-                            <div className="h-2.5 w-24 bg-slate-700/20 rounded animate-pulse" />
-                          </div>
-                        ) : (
-                          <>
-                            <p className="text-slate-400 text-sm mt-0.5">
-                              {deal.targetCompanyName} {company ? `/ ${company.sector}` : ''}
-                            </p>
-                            {/* 점수 구성 표시 (선택된 딜) */}
-                            {isSelected && company && (company.directScore != null || company.propagatedScore != null) && (
-                              <p className="text-slate-500 text-[10px] mt-1 flex items-center gap-1.5">
-                                <span className="text-slate-400">직접 {company.directScore ?? 0}</span>
-                                <span className="text-slate-600">+</span>
-                                <span className="text-slate-400">전이 {company.propagatedScore ?? 0}</span>
-                                {company.propagatedScore > 0 && (
-                                  <span className="text-slate-600 text-[9px]">(관련기업 영향)</span>
-                                )}
-                              </p>
-                            )}
-                            {/* Last event indicator */}
-                            {isSelected && recentEvents.length > 0 && (
-                              <p className="text-slate-500 text-[10px] mt-1 flex items-center gap-1">
-                                <span className="text-red-400">●</span>
-                                마지막 이벤트: {formatRelativeTime(recentEvents[0].publishedAt)}
-                              </p>
-                            )}
-                            {/* U22: 더블클릭 힌트 (선택된 카드에만 표시) */}
-                            {isSelected && company && (
-                              <p className="text-slate-600 text-[10px] mt-1">더블클릭으로 상세 분석 이동</p>
-                            )}
-                          </>
+                    <div className="flex items-center gap-4 min-w-0">
+                      <ScoreGauge
+                        score={deal.score ?? 0}
+                        size={48}
+                        riskLevel={deal.riskLevel}
+                      />
+                      <div className="min-w-0">
+                        <h3 className="text-white font-medium text-base truncate">{deal.name}</h3>
+                        <p className="text-slate-400 text-sm mt-0.5 truncate">
+                          {deal.targetCompanyName}{deal.riskLevel ? ` / ${deal.riskLevel}` : ''}
+                        </p>
+                        {isSelected && company && (
+                          <p className="text-slate-500 text-[10px] mt-0.5">
+                            직접 {company.directScore ?? 0} + 전이 {company.propagatedScore ?? 0}
+                            {company.propagatedScore > 0 && ' (관련기업)'}
+                          </p>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      {isSelected && dealDetailLoading ? (
-                        <div className="h-6 w-16 bg-slate-700/30 rounded-full animate-pulse" />
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {sparklineCache[deal.id] && (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <Sparkline
+                            data={sparklineCache[deal.id]}
+                            width={72}
+                            height={28}
+                          />
+                          {(() => {
+                            const delta = getScoreDelta(sparklineCache[deal.id]);
+                            if (delta === 0) return null;
+                            return (
+                              <span className={`text-[10px] font-medium ${delta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                {delta > 0 ? '+' : ''}{delta} (7d)
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      {deal.riskLevel ? (
+                        <RiskBadge level={deal.riskLevel} animated={isSelected} />
                       ) : (
-                        <>
-                          {/* Sparkline 추세 차트 */}
-                          {sparklineCache[deal.id] && (
-                            <div className="flex flex-col items-end gap-0.5">
-                              <Sparkline
-                                data={sparklineCache[deal.id]}
-                                width={72}
-                                height={28}
-                              />
-                              {(() => {
-                                const delta = getScoreDelta(sparklineCache[deal.id]);
-                                if (delta === 0) return null;
-                                return (
-                                  <span className={`text-[10px] font-medium ${delta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                                    {delta > 0 ? '+' : ''}{delta} (7d)
-                                  </span>
-                                );
-                              })()}
-                            </div>
-                          )}
-                          {company ? (
-                            <RiskBadge level={company.riskLevel} animated />
-                          ) : deal.riskLevel ? (
-                            <RiskBadge level={deal.riskLevel} />
-                          ) : (
-                            <span
-                              className="text-[10px] font-medium px-2 py-0.5 rounded-full"
-                              style={{
-                                color: statusColor,
-                                backgroundColor: statusColor + '20',
-                              }}
-                            >
-                              {deal.status}
-                            </span>
-                          )}
-                        </>
+                        <span
+                          className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+                          style={{
+                            color: statusColor,
+                            backgroundColor: statusColor + '20',
+                          }}
+                        >
+                          {deal.status}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -1400,6 +1382,31 @@ export default function CommandCenter() {
           </span>
         </div>
       </motion.div>
+
+      {/* ============================================ */}
+      {/* CRITICAL 레드 경보 플래시 오버레이 (5초간 깜빡임) */}
+      {/* ============================================ */}
+      <AnimatePresence>
+        {criticalFlash && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-[200] pointer-events-none"
+            style={{
+              background: 'radial-gradient(ellipse at center, rgba(239,68,68,0.18) 0%, rgba(239,68,68,0.04) 100%)',
+              animation: 'criticalRedPulse 0.6s ease-in-out 8',
+            }}
+          />
+        )}
+      </AnimatePresence>
+      <style>{`
+        @keyframes criticalRedPulse {
+          0%, 100% { opacity: 0; }
+          50% { opacity: 1; }
+        }
+      `}</style>
     </motion.div>
   );
 }
