@@ -6,33 +6,6 @@ DART 공시, 뉴스, 블로그를 실시간 수집하고 Neo4j 그래프 DB 기�
 
 ---
 
-## Quick Start
-
-**Prerequisites:** Node.js 18+, Python 3.12+
-
-```bash
-# 1. 의존성 설치
-npm install
-pip install -r requirements.txt
-
-# 2. 환경변수 설정 (.env.local)
-cp .env.example .env.local  # 아래 Environment Variables 참고
-
-# 3. 프론트엔드 (Vite dev server)
-npm run dev
-
-# 4. 백엔드 API (FastAPI, port 8000)
-uvicorn risk_engine.api:app --host 0.0.0.0 --port 8000
-
-# 5. Express 서버 (IM 분석, port 3001)
-node server/index.js
-
-# 6. (선택) 블로그 모니터 실시간 감시
-python scripts/blog_monitor.py
-```
-
----
-
 ## Architecture
 
 ### Graph DB Schema (5-Node Hierarchy)
